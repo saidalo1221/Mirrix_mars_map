@@ -2,6 +2,8 @@
 
 ARES Navigator is a Mars exploration and mission-planning prototype for NASA Space Apps Challenge 2026, built for [Interplanetary Survival Guide: Martian Map](https://www.spaceappschallenge.org/2026/challenges/interplanetary-survival-guide-martian-map/?tab=teams). It combines global NASA imagery and elevation with regional stereo topography to compare hypothetical Marswalks by distance, slope, modeled time, and science stops.
 
+[Launch ARES Navigator on GitHub Pages](https://saidalo1221.github.io/Mirrix_mars_map/)
+
 ## Run locally
 
 Use Node.js 22 or newer. From this project directory, run:
@@ -28,7 +30,7 @@ Use **Search HiRISE terrain** under **Analysis region** to look up a terrain mod
 
 On systems without WebGL, the 2D map supports selection, elevation, planning, and export.
 
-Open **Mars Time** above the map for live or simulated Mars clocks and lighting. Generate a route to enable the linked solar timeline, stop times, and **Best window**. [Mars time and daylight methodology](docs/mars-time.md)
+Open **Mars Time** above the map for live or simulated Mars clocks and lighting. Under **Light settings**, switch off **Solar lighting** for a clear view of the surface. Generate a route to enable the linked solar timeline, stop times, and **Best window**. [Mars time and daylight methodology](docs/mars-time.md)
 
 ## Verify
 
@@ -42,5 +44,6 @@ node --test tests/science.test.mjs
 - [Scientific validation](docs/scientific-validation.md), [limitations](docs/limitations.md), and [tests](docs/testing.md)
 - [AI usage](docs/ai-usage.md), [submission checklist](presentation/submission-checklist.md), [demo script](presentation/demo.md), and [Field Demo PowerPoint](presentation/ARES%20Navigator%20Field%20Demo.pptx)
 - [Marswalk field mode and equipment assumptions](docs/field-mode.md)
+- [Jezero judge demo PowerPoint](presentation/ARES%20Navigator%20-%20Jezero%20Judge%20Demo.pptx), [Space Apps project details](presentation/project-details.md), and [full source inventory](presentation/source-inventory.md)
 
 This educational prototype reports grid-scale measurements and modeled travel assumptions. It cannot assess operational EVA safety.
