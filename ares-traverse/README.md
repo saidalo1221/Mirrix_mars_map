@@ -4,6 +4,8 @@ ARES Navigator is a Mars exploration and mission-planning prototype for NASA Spa
 
 [Launch ARES Navigator on GitHub Pages](https://saidalo1221.github.io/Mirrix_mars_map/)
 
+To deploy on Vercel, import the GitHub repository and keep the Root Directory at the repository root. The checked-in configuration serves `ares-traverse/dist` as a static site.
+
 ## Run locally
 
 Use Node.js 22 or newer. From this project directory, run:
@@ -44,6 +46,6 @@ node --test tests/science.test.mjs
 - [Scientific validation](docs/scientific-validation.md), [limitations](docs/limitations.md), and [tests](docs/testing.md)
 - [AI usage](docs/ai-usage.md), [submission checklist](presentation/submission-checklist.md), [demo script](presentation/demo.md), and [Field Demo PowerPoint](presentation/ARES%20Navigator%20Field%20Demo.pptx)
 - [Marswalk field mode and equipment assumptions](docs/field-mode.md)
-- [Jezero judge demo PowerPoint](presentation/ARES%20Navigator%20-%20Jezero%20Judge%20Demo.pptx), [Space Apps project details](presentation/project-details.md), and [full source inventory](presentation/source-inventory.md)
+- [Jezero judge demo PowerPoint](presentation/ARES%20Navigator%20-%20Martian%20Map.pptx), [Space Apps project details](presentation/project-details.md), and [full source inventory](presentation/source-inventory.md)
 
 This educational prototype reports grid-scale measurements and modeled travel assumptions. It cannot assess operational EVA safety.

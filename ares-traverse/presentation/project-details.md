@@ -36,7 +36,7 @@ We considered source resolution, coordinate conventions, DEM vertical reference,
 
 - [Open ARES Navigator](https://ares-traverse.sparsehorn8.chatgpt.site/)
 - [Open ARES Navigator on GitHub Pages](https://saidalo1221.github.io/Mirrix_mars_map/)
-- [Jezero judge demo PowerPoint](ARES%20Navigator%20-%20Jezero%20Judge%20Demo.pptx)
+- [Jezero judge demo PowerPoint](ARES%20Navigator%20-%20Martian%20Map.pptx)
 - [Source inventory](source-inventory.md)
 - [GitHub repository](https://github.com/saidalo1221/Mirrix_mars_map)
 - [AI usage disclosure](../docs/ai-usage.md)
