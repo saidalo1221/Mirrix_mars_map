@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore Mars and compare astronaut traverses with NASA imagery and numerical elevation data.">
+  <title>ARES Navigator</title>
+  <link rel="stylesheet" href="./navigator.css">
+  <script type="module" src="./nav/app.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="identity" href="./"><span class="brand-planet" aria-hidden="true"></span><span>ARES <strong>NAVIGATOR</strong></span></a>
+    <span class="event-name">NASA SPACE APPS CHALLENGE 2026</span>
+    <nav aria-label="Project links"><a href="./traverse.html">Ares Traverse</a><button id="sources-button">Data sources <span aria-hidden="true">↗</span></button></nav>
+  </header>
+  <main>
+    <header class="page-heading">
+      <div><p class="eyebrow"><span class="signal"></span> MARS EXPLORATION</p><h1>Mission planner</h1><p class="subtitle">Explore Mars, inspect elevation, and compare astronaut traverses.</p></div>
+    </header>
+    <div class="workspace" id="planning-workspace">
+      <aside class="control-panel panel" aria-label="Mission controls">
+        <section class="control-section">
+          <h2>Explore Mars</h2>
+          <label for="search">Search places or coordinates</label>
+          <form id="search-form"><input id="search" type="search" placeholder="Jezero or 18.44, 77.45" autocomplete="off"><button aria-label="Find location">Go</button></form>
+          <label for="places">Jump to a place</label>
+          <select id="places"><option value="">Choose a place</option><optgroup id="place-regions" label="Routing regions"></optgroup><optgroup id="landmarks" label="Landmarks"></optgroup></select>
+          <p class="small muted">Regions open detailed terrain. Landmarks show a nearby terrain link in the inspector.</p>
+        </section>
+        <section class="control-section">
+          <p class="eyebrow">SURFACE DATA</p>
+          <label for="layer">Imagery layer</label>
+          <select id="layer"></select>
+          <label for="region">Analysis region</label>
+          <select id="region"><option value="">Global overview</option></select>
+          <form id="model-search" class="model-search">
+            <label for="model-query">Search HiRISE terrain</label>
+            <div class="model-search-input"><input id="model-query" type="search" required autocomplete="off" aria-controls="model-results" placeholder="Crater name or product ID"><button type="submit">Search</button></div>
+          </form>
+          <p id="model-status" class="small muted" role="status"></p>
+          <div id="model-results" class="model-results" hidden></div>
+          <p class="muted small" id="region-detail">Loading elevation catalog…</p>
+          <div id="regional-layers" class="regional-layers" hidden>
+            <p class="eyebrow">REGIONAL SCIENCE</p>
+            <div class="segmented" aria-label="Regional science layers">
+              <button type="button" data-science-layer="optical" aria-pressed="false">Optical</button>
+              <button type="button" data-science-layer="topography" aria-pressed="true">Topography</button>
+              <button type="button" data-science-layer="thermal" aria-pressed="false">Thermal IR</button>
+            </div>
+            <p class="small muted" id="regional-science-note"></p>
+          </div>
+        </section>
+        <details class="control-section mission-inputs" open>
+          <summary>Mission configuration</summary>
+          <label for="mission-name">Mission name</label>
+          <input id="mission-name" value="Mars surface traverse" maxlength="80">
+          <label for="objective">Mission objective</label>
+          <select id="objective"></select>
+          <div class="field-pair">
+            <label>Time limit (min)<input id="maxMinutes" type="number" min="1" max="1440" value="120"></label>
+            <label>Distance limit (km)<input id="maxKm" type="number" min=".1" max="200" step=".1" value="8"></label>
+          </div>
+          <div class="field-pair">
+            <label>Speed (m/s)<input id="speed" type="number" min=".1" max="5" step=".1" value="1.1"></label>
+            <label>Slope ceiling (°)<input id="maxSlope" type="number" min="1" max="45" value="20"></label>
+          </div>
+          <div class="field-pair">
+            <label>Terrain weight<input id="terrainWeight" type="number" min="0" max="8" step=".5" value="2"></label>
+            <label>Min per stop<input id="stopMinutes" type="number" min="0" max="120" value="10"></label>
+          </div>
+          <details class="equipment">
+            <summary>Equipment assumptions</summary>
+            <div class="field-pair">
+              <label>Support time (min)<input id="equipmentMinutes" type="number" min="0" max="1440" value="0"></label>
+              <label>Reserve (min)<input id="reserveMinutes" type="number" min="0" max="1439" value="0"></label>
+            </div>
+            <p class="small muted">User-entered support time. Use 0 to omit the equipment budget. Reserve is held back from usable time.</p>
+          </details>
+          <div class="endpoint"><span class="point-key start-key">A</span><span><strong>Start</strong><small id="start-value">Choose a surface point</small></span></div>
+          <div class="endpoint"><span class="point-key end-key">B</span><span><strong>Destination</strong><small id="end-value">Choose a surface point</small></span></div>
+        </details>
+      </aside>
+      <section class="map-column" aria-label="Mars map and route profile">
+        <div class="map-panel panel">
+          <div class="map-header">
+            <div class="map-heading"><span class="signal"></span><h2 id="map-heading">Mars globe</h2></div>
+            <div class="segmented" aria-label="Map view">
+              <button data-mode="globe" aria-pressed="true">Globe</button>
+              <button data-mode="map" aria-pressed="false">2D map</button>
+              <button data-mode="terrain" aria-pressed="false" title="Select an analysis region to view terrain">Terrain</button>
+            </div>
+          </div>
+          <div id="surface" class="surface" tabindex="0" role="region" aria-label="Interactive Mars surface. Use arrow keys to move, plus or minus to zoom, and Enter to select the center.">
+            <canvas id="planet" aria-hidden="true"></canvas><canvas id="map-overlay" aria-hidden="true"></canvas>
+            <div class="map-instrument"><span id="map-kind">GLOBAL IMAGERY</span><small id="map-resolution">PLANETOCENTRIC · EAST-POSITIVE</small></div>
+            <div class="map-tools">
+              <button id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+              <button id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+              <button id="recenter" aria-label="Center map on selected point" title="Pan or rotate back to the selected point">Center</button>
+              <button id="fullscreen" aria-label="Toggle fullscreen" title="Toggle fullscreen">⛶</button>
+            </div>
+            <div class="map-readout"><span id="hover-coordinates">DRAG TO ROTATE · SCROLL TO ZOOM</span></div>
+          </div>
+          <div class="map-footer"><span id="layer-credit">Loading imagery…</span><span id="map-message" role="status"></span></div>
+        </div>
+        <section class="panel profile-panel" aria-labelledby="profile-title">
+          <div class="section-head"><h2 id="profile-title">Elevation profile</h2><span id="profile-meta" class="muted small">Along the selected route</span></div>
+          <div id="profile" class="profile-empty">Generate routes to view elevation along the traverse.</div>
+          <div id="simulation" hidden>
+            <button id="play" aria-label="Play traverse">▶</button>
+            <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Traverse progress">
+            <output id="progress-value"></output>
+          </div>
+        </section>
+      </section>
+      <aside class="inspector" aria-label="Location and route analysis">
+        <section class="panel inspector-card">
+          <div class="section-head"><h2>Surface inspector</h2></div>
+          <p id="location-title" class="location-title">Jezero Crater</p>
+          <p class="mono muted" id="location-coordinates"></p>
+          <div class="elevation-card"><span class="eyebrow">SURFACE ELEVATION</span><strong id="elevation-value">—</strong><small id="elevation-source">Loading numerical data…</small></div>
+          <div class="point-actions"><button id="set-start">Set start</button><button id="set-end">Set destination</button></div>
+          <div class="destination-action">
+            <button class="primary full" id="plan" disabled>Generate routes <span aria-hidden="true">→</span></button>
+            <p class="status small" id="mission-status" role="status">Set a destination to open its terrain. The planner checks the archive if needed.</p>
+          </div>
+          <p id="terrain-search-status" class="small muted" role="status"></p>
+          <button id="add-stop" class="full" disabled>Add science stop</button>
+          <div id="science-info"></div>
+        </section>
+        <section class="panel inspector-card">
+          <div class="section-head"><h2>Science stops</h2></div>
+          <div id="waypoints"><p class="muted small">Select a surface point to add an observation stop.</p></div>
+        </section>
+        <section class="panel inspector-card">
+          <div class="section-head"><h2>Route comparison</h2><span id="route-count" class="muted small"></span></div>
+          <p id="recommendation" class="small muted" role="status">Your ranked route alternatives appear here.</p>
+          <div id="routes"></div>
+          <div class="point-actions"><button id="export" disabled>Export JSON</button><button id="print" disabled>Print report</button></div>
+        </section>
+      </aside>
+    </div>
+    <footer class="site-footer"><span>ARES Navigator · Research and education prototype</span><span>Grid-scale slope and hypothetical travel estimates · No operational EVA use</span></footer>
+  </main>
+  <section id="print-report" aria-label="Mission report"></section>
+  <dialog id="sources"><div class="section-head"><h2>Data sources and methods</h2><form method="dialog"><button aria-label="Close data sources">×</button></form></div><div id="source-list"></div>
+    <p>Coordinates are planetocentric and east-positive. Distances use a 3,389.5 km spherical Mars. Elevation is sampled from numerical rasters. Slope and route statistics are derived. Walk speed, slope penalties, and science activities are mission assumptions.</p>
+    <p>Terrain resolution limits what can be inferred about rocks, sand, and small obstacles. Inspect each product's datum before comparing elevation values across products.</p>
+  </dialog>
+</body>
+</html>

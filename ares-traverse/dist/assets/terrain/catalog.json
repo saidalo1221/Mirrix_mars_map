@@ -1,0 +1,267 @@
+{
+  "global": {
+    "id": "mola",
+    "name": "Global MOLA topography",
+    "url": "mola.json",
+    "west": -179.875,
+    "east": 179.875,
+    "south": -89.875,
+    "north": 89.875,
+    "width": 1440,
+    "height": 720,
+    "wrapLongitude": true,
+    "resolutionMeters": 14818,
+    "resolutionNote": "0.25° grid, 14.818 km nominal at the equator",
+    "datum": "GMM3 Mars areoid (degree and order 50)",
+    "source": "NASA PDS • Mars Global Surveyor MOLA MEGDR 4 pixels/degree",
+    "sourceUrl": "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/megt90n000cb.lbl",
+    "productUrl": "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/megt90n000cb.img",
+    "sourceSha256": "25f16fb7aaf857898dcf98bc4f841341a24f8b9f7e98453ca083bc45d897ca2c",
+    "processing": "Native NASA grid cells with centers derived from the 0.25° bin extents. Columns rotated to signed east longitude. PDS interpolates empty bins."
+  },
+  "regions": [
+    {
+      "id": "jezero",
+      "name": "Jezero western fan",
+      "url": "jezero.json",
+      "west": 77.36508248166339,
+      "east": 77.48674163377713,
+      "south": 18.402287073183548,
+      "north": 18.491701278931558,
+      "width": 343,
+      "height": 266,
+      "resolutionMeters": 20,
+      "resolutionNote": "Native 20 m spacing in source projection; local east–west ground spacing varies with latitude.",
+      "datum": "Mars MOLA-aligned topography (areoid reference)",
+      "source": "USGS Astrogeology / NASA Mars 2020 • CTX stereo DEM mosaic",
+      "sourceUrl": "https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic",
+      "productUrl": "https://planetarymaps.usgs.gov/mosaic/mars2020_trn/CTX/ScienceInvestigationMaps_JPL/M20_JezeroCrater_CTXDEM_20m.tif",
+      "productLabelUrl": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/CTX/ScienceInvestigationMaps_JPL/M20_JezeroCrater_CTXDEM_20m.xml",
+      "sourceHeaderRange": [
+        0,
+        65535
+      ],
+      "sourceRowsRange": [
+        42202676,
+        46943859
+      ],
+      "sourceHeaderSha256": "9363dd7975852b8918ba5589bdd33f973534a210ddd2b1dc45121835f0c15a2e",
+      "sourceRowsSha256": "93c51163785b03f4a077d7c65eaf0c88b4eff0a31c5efa7f0a2fdb4900965ef8",
+      "processing": "Native center pixels from Jezero CTX Science Investigation DEM; inverse equirectangular projection to planetocentric coordinates; heights rounded to 0.01 m for serialization only.",
+      "demo": {
+        "start": {
+          "lat": 18.4446,
+          "lon": 77.4509
+        },
+        "end": {
+          "lat": 18.4608,
+          "lon": 77.4065
+        },
+        "waypoints": [
+          {
+            "id": "fan-observation",
+            "name": "Fan-front observation",
+            "lat": 18.449,
+            "lon": 77.4135,
+            "description": "Hypothetical stop to look for exposed layering near the western fan front."
+          }
+        ],
+        "description": "Plan a hypothetical traverse from the Perseverance landing vicinity toward the Jezero western fan. The destination and observation stop are proposed planning points."
+      }
+    },
+    {
+      "id": "gale",
+      "name": "Gale lower Mount Sharp",
+      "url": "gale.json",
+      "west": 137.3570483817099,
+      "east": 137.3840173311522,
+      "south": -4.664151788881264,
+      "north": -4.658519033617997,
+      "width": 159,
+      "height": 34,
+      "resolutionMeters": 10.12,
+      "resolutionNote": "Approximately 10.1 m grid posts, every tenth native 1.01 m sample; detail below the grid spacing is unresolved.",
+      "datum": "Mars 2000 equipotential surface (areoid)",
+      "source": "NASA / JPL-Caltech / University of Arizona • HiRISE stereo DTM",
+      "sourceUrl": "https://www.uahirise.org/dtm/dtm.php?ID=ESP_040770_1755",
+      "productUrl": "https://hirise-pds.lpl.arizona.edu/PDS/DTM/ESP/ORB_040700_040799/ESP_040770_1755_ESP_039280_1755/DTEEC_040770_1755_039280_1755_A01.IMG",
+      "productSpecificationUrl": "https://hirise-pds.lpl.arizona.edu/PDS/DOCUMENT/HIRISE_EDR_RDR_VOL_SIS.PDF",
+      "sourceHeaderRange": [
+        0,
+        16383
+      ],
+      "sourceRowsRange": [
+        110691120,
+        118926399
+      ],
+      "sourceHeaderSha256": "794d1eafe05039e2b24a7fb6ee5b93c160e425eaf7be505351c5e3972a3d71e4",
+      "sourceRowsSha256": "af575c93bcd7bb009f8df0403e361e93040c341f6131be2ac289482649cd5314",
+      "processing": "DTEEC_040770_1755_039280_1755_A01. Pixel centers from PDS3 line/sample offsets, sampled at a ten-pixel interval along each axis. No-data retained; heights rounded to 0.01 m for serialization only.",
+      "demo": {
+        "start": {
+          "lat": -4.6591,
+          "lon": 137.373
+        },
+        "end": {
+          "lat": -4.6631,
+          "lon": 137.363
+        },
+        "waypoints": [
+          {
+            "id": "gale-outcrop-observation",
+            "name": "Lower-slope observation",
+            "lat": -4.6595,
+            "lon": 137.3655,
+            "description": "Hypothetical stop to inspect bedding and compare material along the lower slopes."
+          }
+        ],
+        "description": "Compare hypothetical traverses on the lower slopes of Mount Sharp near Pahrump Hills, which Curiosity explored."
+      }
+    },
+    {
+      "id": "mawrth",
+      "name": "Mawrth Vallis",
+      "width": 193,
+      "height": 193,
+      "west": -18.42447684498365,
+      "east": -18.398148381728763,
+      "north": 22.23517178280066,
+      "south": 22.20884513358118,
+      "resolutionMeters": 8.1281859150366,
+      "datum": "Mars areoid (MOLA-aligned stereo elevation)",
+      "source": "NASA / USGS HiRISE stereo terrain · DTEEC_036305_2025_035804_2025_L01",
+      "sourceUrl": "https://stac.astrogeology.usgs.gov/docs/data/mars/hirise_dtms/",
+      "productUrl": "https://astrogeo-ard.s3-us-west-2.amazonaws.com/mars/mro/hirise/controlled/dtm/ESP_036305_2025_ESP_035804_2025/DTEEC_036305_2025_035804_2025_L01.tif",
+      "processing": "North-up equirectangular COG window, with calibrated elevation and preserved no-data.",
+      "demo": {
+        "start": {
+          "lat": 22.22205,
+          "lon": -18.41125
+        },
+        "end": {
+          "lon": -18.405416134606416,
+          "lat": 22.22200845819092
+        },
+        "waypoints": [],
+        "description": "Example route through the verified local elevation window."
+      },
+      "url": "mawrth.json"
+    },
+    {
+      "id": "gusev",
+      "name": "Gusev · Spirit landing site",
+      "width": 193,
+      "height": 193,
+      "west": 175.48536272246423,
+      "east": 175.5116817203499,
+      "north": -14.571942484338235,
+      "south": -14.598246404716512,
+      "resolutionMeters": 8.125263743704576,
+      "datum": "Mars areoid (MOLA-aligned stereo elevation)",
+      "source": "NASA / USGS HiRISE stereo terrain · DTEEC_001513_1655_001777_1650_U01",
+      "sourceUrl": "https://stac.astrogeology.usgs.gov/docs/data/mars/hirise_dtms/",
+      "productUrl": "https://astrogeo-ard.s3-us-west-2.amazonaws.com/mars/mro/hirise/controlled/dtm/PSP_001513_1655_PSP_001777_1650/DTEEC_001513_1655_001777_1650_U01.tif",
+      "processing": "North-up equirectangular COG window, with calibrated elevation and preserved no-data.",
+      "demo": {
+        "start": {
+          "lat": -14.58505,
+          "lon": 175.4985
+        },
+        "end": {
+          "lon": 175.50441658030854,
+          "lat": -14.585094444527375
+        },
+        "waypoints": [],
+        "description": "Example route through the verified local elevation window."
+      },
+      "url": "gusev.json"
+    },
+    {
+      "id": "olympus",
+      "name": "Olympus Mons · Pangboche Crater",
+      "width": 193,
+      "height": 193,
+      "west": -133.33816412620288,
+      "east": -133.3118927200752,
+      "north": 17.29244552456313,
+      "south": 17.266169931096506,
+      "resolutionMeters": 8.111863828018448,
+      "datum": "Mars areoid (MOLA-aligned stereo elevation)",
+      "source": "NASA / USGS HiRISE stereo terrain · DTEEC_005533_1975_005388_1975_A01",
+      "sourceUrl": "https://stac.astrogeology.usgs.gov/docs/data/mars/hirise_dtms/",
+      "productUrl": "https://astrogeo-ard.s3-us-west-2.amazonaws.com/mars/mro/hirise/controlled/dtm/PSP_005533_1975_PSP_005388_1975/DTEEC_005533_1975_005388_1975_A01.tif",
+      "processing": "North-up equirectangular COG window, with calibrated elevation and preserved no-data.",
+      "demo": {
+        "start": {
+          "lat": 17.27935,
+          "lon": -133.325
+        },
+        "end": {
+          "lon": -133.32502842313903,
+          "lat": 17.28519236594995
+        },
+        "waypoints": [],
+        "description": "Example route through the verified local elevation window."
+      },
+      "url": "olympus.json"
+    },
+    {
+      "id": "valles",
+      "name": "Valles Marineris · Canyon floor",
+      "width": 193,
+      "height": 193,
+      "west": -69.69061329055828,
+      "east": -69.66428089524479,
+      "north": -11.504217890142217,
+      "south": -11.530561601662866,
+      "resolutionMeters": 8.132893395978066,
+      "datum": "Mars areoid (MOLA-aligned stereo elevation)",
+      "source": "NASA / USGS HiRISE stereo terrain · DTEEC_027802_1685_028501_1685_A01",
+      "sourceUrl": "https://stac.astrogeology.usgs.gov/docs/data/mars/hirise_dtms/",
+      "productUrl": "https://astrogeo-ard.s3-us-west-2.amazonaws.com/mars/mro/hirise/controlled/dtm/ESP_027802_1685_ESP_028501_1685/DTEEC_027802_1685_028501_1685_A01.tif",
+      "processing": "North-up equirectangular COG window, with calibrated elevation and preserved no-data.",
+      "demo": {
+        "start": {
+          "lat": -11.51745,
+          "lon": -69.6775
+        },
+        "end": {
+          "lon": -69.67744709290153,
+          "lat": -11.52328963962852
+        },
+        "waypoints": [],
+        "description": "Example route through the verified local elevation window."
+      },
+      "url": "valles.json"
+    },
+    {
+      "id": "elysium",
+      "name": "Elysium Planitia · Lava channel",
+      "width": 193,
+      "height": 193,
+      "west": 157.33774967511573,
+      "east": 157.36397447536024,
+      "north": 2.1344341029802862,
+      "south": 2.108199917513748,
+      "resolutionMeters": 8.09908025155931,
+      "datum": "Mars areoid (MOLA-aligned stereo elevation)",
+      "source": "NASA / USGS HiRISE stereo terrain · DTEEC_018339_1820_018194_1820_A01",
+      "sourceUrl": "https://stac.astrogeology.usgs.gov/docs/data/mars/hirise_dtms/",
+      "productUrl": "https://astrogeo-ard.s3-us-west-2.amazonaws.com/mars/mro/hirise/controlled/dtm/ESP_018339_1820_ESP_018194_1820/DTEEC_018339_1820_018194_1820_A01.tif",
+      "processing": "North-up equirectangular COG window, with calibrated elevation and preserved no-data.",
+      "demo": {
+        "start": {
+          "lat": 2.1213,
+          "lon": 157.3508
+        },
+        "end": {
+          "lon": 157.35673533779274,
+          "lat": 2.121317010247017
+        },
+        "waypoints": [],
+        "description": "Example route through the verified local elevation window."
+      },
+      "url": "elysium.json"
+    }
+  ]
+}

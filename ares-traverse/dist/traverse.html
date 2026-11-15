@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Compare Marswalk routes through Curiosity’s boxwork campaign on lower Mount Sharp.">
+<title>Ares Traverse | Marswalk Planner</title>
+<link rel="stylesheet" href="style.css">
+<script src="data.js" defer></script><script src="app.js" defer></script>
+</head>
+<body>
+<header class="header">
+ <a class="brand" href="./index.html"><span class="planet"></span><span>Ares<span class="accent">Traverse</span><small>MARSWALK PLANNER</small></span></a>
+ <div class="header-right"><span class="event">NASA SPACE APPS CHALLENGE 2026</span><button id="sources-button" class="outline">Data sources ↗</button></div>
+</header>
+<main>
+ <section class="intro">
+  <div><div class="eyebrow"><span class="live-dot"></span> GALE CRATER <span class="slash">/</span> MARS</div><h1>Lower Mount Sharp</h1><p>Plan a return traverse through Curiosity’s boxwork region.</p></div>
+  <button id="export" class="outline export">↓ &nbsp; Export plan</button>
+ </section>
+ <div class="workspace">
+  <div class="map-column">
+   <section class="map-shell" aria-label="Interactive map of lower Mount Sharp">
+    <div class="map" id="map" tabindex="0" aria-label="Map. Drag or use the arrow keys to pan. Scroll or use plus and minus to zoom.">
+     <canvas id="map-canvas" aria-hidden="true"></canvas>
+     <div id="markers"></div>
+     <div class="map-label"><span class="live-dot"></span> BOXWORK REGION</div>
+     <div class="map-controls"><button id="zoom-in" aria-label="Zoom in">+</button><button id="zoom-out" aria-label="Zoom out">−</button><button id="reset-view" aria-label="Reset map view">⌖</button></div>
+     <div class="north" aria-label="North is up">N<span>↑</span></div>
+     <div class="map-footer"><span id="coords"></span><div id="scale"><span></span><strong></strong></div></div>
+     <div id="thermal-panel" hidden>
+      <div class="thermal-heading"><span class="eyebrow">MARS ODYSSEY / THEMIS</span><button class="icon-button" id="close-thermal" aria-label="Close thermal image">×</button></div>
+      <img src="assets/thermal.png" alt="Thermal inertia map of Gale Crater">
+      <div class="thermal-gradient"></div><div class="thermal-range"><span>90</span><span>785 J m⁻² K⁻¹ s⁻½</span></div>
+      <p>Regional thermal inertia. Use it to compare how quickly surfaces heat and cool.</p>
+      <a href="https://themis.mars.asu.edu/landingsites/mslsite_06" target="_blank" rel="noreferrer">View THEMIS product ↗</a>
+     </div>
+    </div>
+    <div class="layer-bar"><span class="eyebrow">LAYERS</span><div class="layer-buttons"><button data-layer="imagery" aria-pressed="true">Orbital imagery</button><button data-layer="terrain" aria-pressed="true">Waypoint grades</button><button data-layer="thermal" aria-pressed="false">Thermal context</button></div><span id="imagery-credit"></span></div>
+   </section>
+   <section class="profile card" aria-labelledby="profile-title">
+    <div class="panel-heading"><h2 id="profile-title">Elevation profile</h2><span id="profile-tag" class="tag">CURIOSITY WAYPOINTS</span></div>
+    <div id="profile-wrap"><canvas id="profile-canvas" role="img" aria-label="Elevation profile of measured Curiosity waypoints"></canvas><p id="no-profile" hidden>Elevation coverage is unknown between the shortcut’s endpoints.</p></div>
+    <div class="scrub"><button id="play" aria-label="Play route">▶</button><input id="progress" type="range" min="0" max="1000" value="0" aria-label="Position along selected route"><output id="progress-value"></output></div>
+   </section>
+  </div>
+  <aside class="sidebar">
+   <section class="card route-panel">
+    <div class="panel-heading"><h2>Route comparison</h2><span class="tag">ROUND TRIP</span></div>
+    <button class="route-choice" data-route="traverse" aria-pressed="true"><span class="route-dot mint"></span><span><strong>Rover waypoint route</strong><small>Follows documented drive endpoints</small></span><span class="route-length" id="traverse-distance"></span></button>
+    <button class="route-choice" data-route="direct" aria-pressed="false"><span class="route-dot rust"></span><span><strong>Direct shortcut</strong><small>Proposed line between endpoints</small></span><span class="route-length" id="direct-distance"></span></button>
+    <div class="route-stats"><div><span>WALK + SCIENCE</span><strong id="duration"></strong></div><div><span>OUTBOUND GAIN</span><strong id="gain"></strong></div><div><span>MAX AVG. GRADE</span><strong id="grade"></strong></div></div>
+    <div id="assessment" class="assessment" role="status"></div>
+    <details class="budget"><summary>Adjust time budget</summary><label>Walking speed <output id="speed-value"></output><input id="speed" type="range" min="0.5" max="3" step=".1" value="1.2"></label><label>Time at science stop <output id="science-value"></output><input id="science-time" type="range" min="5" max="45" step="5" value="20"></label><label>Available time <output id="budget-value"></output><input id="budget" type="range" min="30" max="180" step="5" value="120"></label></details>
+   </section>
+   <section class="card science-panel">
+    <div class="panel-heading"><h2>Science stop</h2><span class="tag">SOL 4677</span></div>
+    <button class="photo-button" id="photo-button" aria-label="Open Curiosity panorama"><img src="assets/panorama.jpg" alt="Curiosity Mastcam panorama looking across the boxwork region"><span>↗</span></button>
+    <div class="science-copy"><div class="eyebrow"><span class="route-dot mint"></span> WAYPOINT B</div><h3>Ridge and hollow</h3><p>Photograph the bright ridge and the adjacent sand-filled hollow. Compare their textures for clues to how ancient groundwater changed the rock.</p><button class="text-button" id="focus-stop">Locate on map →</button></div>
+   </section>
+  </aside>
+ </div>
+ <footer><span>Ares Traverse · NASA Space Apps Challenge</span><span>Mission concept · Historical observations · Simulated walk times</span></footer>
+</main>
+<dialog id="sources"><div class="panel-heading"><h2>Data sources</h2><form method="dialog"><button class="icon-button" aria-label="Close sources">×</button></form></div>
+ <ul>
+  <li><a href="https://science.nasa.gov/mission/msl-curiosity/location-map/" target="_blank" rel="noreferrer">Curiosity mission waypoint data ↗</a><p>NASA/JPL-Caltech. Coordinates and elevation above the Mars areoid from recorded drive endpoints. Outbound route length uses the distance between consecutive points on a Mars sphere. Segment grades are endpoint averages and can miss steep or rough terrain between fixes.</p></li>
+  <li><a href="https://trek.nasa.gov/mars/" target="_blank" rel="noreferrer">Mars Trek CTX imagery ↗</a><p>Mars Reconnaissance Orbiter Context Camera. Orbital imagery gives local visual context. The map keeps geographic positions when the imagery is switched off.</p></li>
+  <li><a href="https://themis.mars.asu.edu/landingsites/mslsite_06" target="_blank" rel="noreferrer">Gale Crater thermal inertia ↗</a><p>NASA Mars Odyssey / THEMIS and Arizona State University. This regional product describes heat retention and is shown separately from the local route.</p></li>
+  <li><a href="https://science.nasa.gov/blog/curiosity-blog-sols-4675-4681-deciding-where-to-dig-into-the-boxworks/" target="_blank" rel="noreferrer">Curiosity’s Sol 4677 field report ↗</a><p>NASA/JPL-Caltech. Ridge and hollow observations motivate the proposed science task. The panorama shows the wider boxwork region from Sol 4536.</p></li>
+ </ul><p>Walk times use a constant assumed speed, a return along the selected path, and the selected science time. The plan is a hackathon concept.</p>
+</dialog>
+<dialog id="photo-dialog"><div class="panel-heading"><h2>Curiosity panorama · Sol 4536</h2><form method="dialog"><button class="icon-button" aria-label="Close image">×</button></form></div><img src="assets/panorama.jpg" alt="Curiosity panorama of the Mount Sharp boxwork region"><p>Mastcam · May 22, 2025 · NASA/JPL-Caltech/MSSS · Regional view</p></dialog>
+</body>
+</html>
