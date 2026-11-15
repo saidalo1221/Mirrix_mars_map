@@ -8,30 +8,32 @@
   <link rel="stylesheet" href="./navigator.css">
   <script type="module" src="./nav/app.js"></script>
 </head>
-<body>
+<body data-view="globe">
+  <div class="deep-space" aria-hidden="true"><div class="star-drift"></div><div class="distant-sun"></div><div class="planetary-orbits"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
   <header class="masthead">
     <a class="identity" href="./"><span class="brand-planet" aria-hidden="true"></span><span>ARES <strong>NAVIGATOR</strong></span></a>
     <span class="event-name">NASA SPACE APPS CHALLENGE 2026</span>
+    <div id="header-view-controls"><div class="segmented" id="mode-switch" aria-label="Map view">
+              <button data-mode="globe" aria-pressed="true">Globe</button>
+              <button data-mode="map" aria-pressed="false">2D map</button>
+              <button data-mode="terrain" aria-pressed="false" title="Select an analysis region to view terrain">Terrain</button>
+            </div></div>
     <nav aria-label="Project links"><a href="./traverse.html">Ares Traverse</a><button id="sources-button">Data sources <span aria-hidden="true">↗</span></button></nav>
   </header>
   <main>
     <header class="page-heading">
-      <div><p class="eyebrow"><span class="signal"></span> MARS EXPLORATION</p><h1>Mission planner</h1><p class="subtitle">Explore Mars, inspect elevation, and compare astronaut traverses.</p></div>
+      <div><h1>Mission planner</h1><p id="mission-brief" class="subtitle" hidden></p></div>
+      <div class="heading-actions"><button id="demo" type="button" disabled>Load mission demo</button><button id="field-open" type="button" disabled>Field mode</button></div>
     </header>
     <div class="workspace" id="planning-workspace">
       <aside class="control-panel panel" aria-label="Mission controls">
         <section class="control-section">
-          <h2>Explore Mars</h2>
+          <h2>Location</h2>
           <label for="search">Search places or coordinates</label>
           <form id="search-form"><input id="search" type="search" placeholder="Jezero or 18.44, 77.45" autocomplete="off"><button aria-label="Find location">Go</button></form>
           <label for="places">Jump to a place</label>
           <select id="places"><option value="">Choose a place</option><optgroup id="place-regions" label="Routing regions"></optgroup><optgroup id="landmarks" label="Landmarks"></optgroup></select>
-          <p class="small muted">Regions open detailed terrain. Landmarks show a nearby terrain link in the inspector.</p>
-        </section>
-        <section class="control-section">
-          <p class="eyebrow">SURFACE DATA</p>
-          <label for="layer">Imagery layer</label>
-          <select id="layer"></select>
+          <div id="landmark-chips" class="landmarks" aria-label="Landmark shortcuts"></div>
           <label for="region">Analysis region</label>
           <select id="region"><option value="">Global overview</option></select>
           <form id="model-search" class="model-search">
@@ -42,17 +44,45 @@
           <div id="model-results" class="model-results" hidden></div>
           <p class="muted small" id="region-detail">Loading elevation catalog…</p>
           <div id="regional-layers" class="regional-layers" hidden>
-            <p class="eyebrow">REGIONAL SCIENCE</p>
+            <h3>Regional science</h3>
             <div class="segmented" aria-label="Regional science layers">
               <button type="button" data-science-layer="optical" aria-pressed="false">Optical</button>
               <button type="button" data-science-layer="topography" aria-pressed="true">Topography</button>
               <button type="button" data-science-layer="thermal" aria-pressed="false">Thermal IR</button>
+              <button type="button" data-science-layer="blend" aria-pressed="false">Blend</button>
             </div>
             <p class="small muted" id="regional-science-note"></p>
+            <div id="layer-blend" hidden>
+              <label>Optical opacity <output id="optical-opacity-value">100%</output><input type="range" id="optical-opacity" min="0" max="100" value="100"></label>
+              <label>Topography opacity <output id="topography-opacity-value">35%</output><input type="range" id="topography-opacity" min="0" max="100" value="35"></label>
+              <label>Thermal IR opacity <output id="thermal-opacity-value">40%</output><input type="range" id="thermal-opacity" min="0" max="100" value="40"></label>
+            </div>
+            <details class="layer-legend"><summary>Layer legend and credits</summary><ul id="regional-layer-legend"></ul></details>
+            <label class="check-line"><input type="checkbox" id="show-hazards"> Show slope hazards</label>
+            <ul class="hazard-legend" id="hazard-legend" hidden>
+              <li><i class="legend-steep"></i> Above slope ceiling</li><li><i class="legend-near"></i> Within 20% of ceiling</li>
+              <li><i class="legend-low"></i> Lower grid-scale slope</li><li><i class="legend-missing"></i> No elevation data</li>
+            </ul>
+            <p class="small muted" id="hazard-note" hidden>Grid-scale slopes can miss rocks and small cliffs. Hold the map to mark a user-observed or assumed no-go area.</p>
+            <details class="space-weather"><summary>Radiation and space weather</summary>
+              <p>Curiosity RAD recorded about 210 µGy/day from galactic cosmic rays during its first 10 months at Gale. A major solar-particle event reached Mars in May 2024.</p>
+              <p class="small muted">Historical Gale observations. Jezero dose, crew exposure, and live Mars forecasts are unavailable.</p>
+              <a href="https://science.nasa.gov/resource/radiation-measurements-on-mars/">NASA RAD baseline</a> · <a href="https://science.nasa.gov/resource/curiosity-sees-specks-caused-by-2024-solar-storm-while-recording-a-wind-gust-on-mars/">May 2024 solar event</a>
+            </details>
           </div>
         </section>
-        <details class="control-section mission-inputs" open>
-          <summary>Mission configuration</summary>
+<section class="control-section route-controls"><h2>Route</h2>
+          <div class="endpoint"><span class="point-key start-key">A</span><span><strong>Start</strong><small id="start-value">Choose a surface point</small></span></div>
+          <div class="endpoint"><span class="point-key end-key">B</span><span><strong>Destination</strong><small id="end-value">Choose a surface point</small></span></div>
+          <div class="destination-action">
+            <button class="primary full" id="plan" disabled>Generate routes <span aria-hidden="true">→</span></button>
+            <p class="status small" id="mission-status" role="status">Set a destination to open its terrain. The planner checks the archive if needed.</p>
+          </div>
+          <div class="point-actions"><button id="undo-point" disabled>Undo point</button><button id="clear-points" disabled>Clear all points</button></div>
+</section>
+        <details class="control-section mission-inputs">
+          <summary>Advanced settings</summary>
+          <label for="layer">Imagery layer</label><select id="layer"></select>
           <label for="mission-name">Mission name</label>
           <input id="mission-name" value="Mars surface traverse" maxlength="80">
           <label for="objective">Mission objective</label>
@@ -62,36 +92,37 @@
             <label>Distance limit (km)<input id="maxKm" type="number" min=".1" max="200" step=".1" value="8"></label>
           </div>
           <div class="field-pair">
-            <label>Speed (m/s)<input id="speed" type="number" min=".1" max="5" step=".1" value="1.1"></label>
-            <label>Slope ceiling (°)<input id="maxSlope" type="number" min="1" max="45" value="20"></label>
+            <label>Level speed (m/s)<input id="speed" type="number" min=".1" max="5" step=".1" value=".8"></label>
+            <label>Slope ceiling (°)<input id="maxSlope" type="number" min="1" max="45" value="15"></label>
           </div>
           <div class="field-pair">
             <label>Terrain weight<input id="terrainWeight" type="number" min="0" max="8" step=".5" value="2"></label>
             <label>Min per stop<input id="stopMinutes" type="number" min="0" max="120" value="10"></label>
           </div>
+          <label for="crewMode">Crew and mobility</label>
+          <select id="crewMode"><option value="solo">Walking</option><option value="pair">Astronauts in pairs</option><option value="rover">Rover support + walking</option></select>
+          <div class="field-pair">
+            <label>Carried load (kg)<input id="carriedKg" type="number" min="0" max="100" value="10"></label>
+            <label>Rover speed (m/s)<input id="roverSpeed" type="number" min=".1" max="8" step=".1" value="1.5"></label>
+          </div>
+          <p class="small muted">Illustrative load model. Effective level speed equals entered speed divided by (1 + carried kg / 50).</p>
           <details class="equipment">
             <summary>Equipment assumptions</summary>
             <div class="field-pair">
-              <label>Support time (min)<input id="equipmentMinutes" type="number" min="0" max="1440" value="0"></label>
-              <label>Reserve (min)<input id="reserveMinutes" type="number" min="0" max="1439" value="0"></label>
+              <label>Support time (min)<input id="equipmentMinutes" type="number" min="0" max="1440" value="180"></label>
+              <label>Reserve (min)<input id="reserveMinutes" type="number" min="0" max="1439" value="20"></label>
             </div>
             <p class="small muted">User-entered support time. Use 0 to omit the equipment budget. Reserve is held back from usable time.</p>
           </details>
-          <div class="endpoint"><span class="point-key start-key">A</span><span><strong>Start</strong><small id="start-value">Choose a surface point</small></span></div>
-          <div class="endpoint"><span class="point-key end-key">B</span><span><strong>Destination</strong><small id="end-value">Choose a surface point</small></span></div>
         </details>
       </aside>
       <section class="map-column" aria-label="Mars map and route profile">
         <div class="map-panel panel">
           <div class="map-header">
             <div class="map-heading"><span class="signal"></span><h2 id="map-heading">Mars globe</h2></div>
-            <div class="segmented" aria-label="Map view">
-              <button data-mode="globe" aria-pressed="true">Globe</button>
-              <button data-mode="map" aria-pressed="false">2D map</button>
-              <button data-mode="terrain" aria-pressed="false" title="Select an analysis region to view terrain">Terrain</button>
-            </div>
+            <div id="fullscreen-view-controls"></div>
           </div>
-          <div id="surface" class="surface" tabindex="0" role="region" aria-label="Interactive Mars surface. Use arrow keys to move, plus or minus to zoom, and Enter to select the center.">
+          <div id="surface" class="surface" tabindex="0" role="region" aria-label="Interactive Mars surface. Use arrow keys to move the crosshair, plus or minus to zoom, and Enter to open point actions.">
             <canvas id="planet" aria-hidden="true"></canvas><canvas id="map-overlay" aria-hidden="true"></canvas>
             <div class="map-instrument"><span id="map-kind">GLOBAL IMAGERY</span><small id="map-resolution">PLANETOCENTRIC · EAST-POSITIVE</small></div>
             <div class="map-tools">
@@ -99,6 +130,23 @@
               <button id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
               <button id="recenter" aria-label="Center map on selected point" title="Pan or rotate back to the selected point">Center</button>
               <button id="fullscreen" aria-label="Toggle fullscreen" title="Toggle fullscreen">⛶</button>
+            </div>
+            <div id="hold-ring" class="hold-ring" hidden aria-hidden="true"></div>
+            <div id="map-crosshair" class="map-crosshair" hidden aria-hidden="true"></div>
+            <div id="place-hint" class="place-hint"><span>Press and hold anywhere to place points.</span><button id="dismiss-place-hint" type="button" aria-label="Dismiss placement hint">×</button></div>
+            <div id="point-menu" class="point-menu" role="group" aria-label="Map point actions" hidden>
+              <strong id="point-menu-title">Place a point</strong><p class="small" id="point-menu-detail"></p>
+              <div class="point-menu-actions">
+                <button id="place-start" type="button">Set start (A)</button><button id="place-end" type="button">Set destination (B)</button>
+                <button id="place-stop" type="button">Add science stop</button><button id="inspect-point" type="button">Inspect only</button>
+                <button id="place-hazard" type="button">Mark no-go area</button><button id="edit-point" type="button" hidden>Edit stop</button><button id="remove-point" type="button" hidden>Delete point</button>
+                <button id="cancel-point" type="button">Cancel</button>
+              </div>
+              <form id="hazard-form" hidden>
+                <label>Reason<select id="hazard-type"><option>Boulder field (user marked)</option><option>Cliff (user marked)</option><option>Other obstacle (user marked)</option></select></label>
+                <label>Radius in meters<input id="hazard-radius" type="number" min="20" max="750" step="1" value="100" required></label>
+                <button type="submit">Save no-go area</button>
+              </form>
             </div>
             <div class="map-readout"><span id="hover-coordinates">DRAG TO ROTATE · SCROLL TO ZOOM</span></div>
           </div>
@@ -114,31 +162,32 @@
           </div>
         </section>
       </section>
-      <aside class="inspector" aria-label="Location and route analysis">
-        <section class="panel inspector-card">
-          <div class="section-head"><h2>Surface inspector</h2></div>
+      <aside class="inspector panel" aria-label="Location and route analysis">
+        <header class="inspector-header">
+          <div role="tablist" aria-label="Inspector panels" class="segmented">
+            <button id="location-tab" role="tab" aria-selected="true" aria-controls="location-panel">Location</button>
+            <button id="routes-tab" role="tab" aria-selected="false" aria-controls="routes-panel" tabindex="-1">Routes</button>
+          </div>
+          <div class="report-actions">
+            <button id="export" aria-label="Export JSON" title="Export JSON" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></button>
+            <button id="print" aria-label="Print report" title="Print report" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V4h10v4M7 17H4V9h16v8h-3M7 14h10v6H7z"/></svg></button>
+          </div>
+        </header>
+        <section class="inspector-card" id="location-panel" role="tabpanel" aria-labelledby="location-tab" tabindex="0">
           <p id="location-title" class="location-title">Jezero Crater</p>
           <p class="mono muted" id="location-coordinates"></p>
-          <div class="elevation-card"><span class="eyebrow">SURFACE ELEVATION</span><strong id="elevation-value">—</strong><small id="elevation-source">Loading numerical data…</small></div>
+          <div class="elevation-card"><strong id="elevation-value">—</strong><small id="elevation-source">Loading numerical data…</small></div>
           <button id="open-local-terrain" type="button" hidden>Open local terrain</button>
-          <div class="point-actions"><button id="set-start">Set start</button><button id="set-end">Set destination</button></div>
-          <div class="destination-action">
-            <button class="primary full" id="plan" disabled>Generate routes <span aria-hidden="true">→</span></button>
-            <p class="status small" id="mission-status" role="status">Set a destination to open its terrain. The planner checks the archive if needed.</p>
-          </div>
+          <div class="point-actions"><button id="set-start">Set start</button><button id="set-end">Set destination</button><button id="add-stop" disabled aria-label="Add science stop">Add stop</button></div>
           <p id="terrain-search-status" class="small muted" role="status"></p>
-          <button id="add-stop" class="full" disabled>Add science stop</button>
+          <h2 class="stop-heading">Science stops</h2>
+          <div id="waypoints"><p class="muted small">Select a surface point to add an observation stop.</p></div>
           <div id="science-info"></div>
         </section>
-        <section class="panel inspector-card">
-          <div class="section-head"><h2>Science stops</h2></div>
-          <div id="waypoints"><p class="muted small">Select a surface point to add an observation stop.</p></div>
-        </section>
-        <section class="panel inspector-card">
+        <section class="inspector-card" id="routes-panel" role="tabpanel" aria-labelledby="routes-tab" tabindex="0" hidden>
           <div class="section-head"><h2>Route comparison</h2><span id="route-count" class="muted small"></span></div>
           <p id="recommendation" class="small muted" role="status">Your ranked route alternatives appear here.</p>
           <div id="routes"></div>
-          <div class="point-actions"><button id="export" disabled>Export JSON</button><button id="print" disabled>Print report</button></div>
         </section>
       </aside>
     </div>
@@ -148,6 +197,24 @@
   <dialog id="sources"><div class="section-head"><h2>Data sources and methods</h2><form method="dialog"><button aria-label="Close data sources">×</button></form></div><div id="source-list"></div>
     <p>Coordinates are planetocentric and east-positive. Distances use a 3,389.5 km spherical Mars. Elevation is sampled from numerical rasters. Slope and route statistics are derived. Walk speed, slope penalties, and science activities are mission assumptions.</p>
     <p>Terrain resolution limits what can be inferred about rocks, sand, and small obstacles. Inspect each product's datum before comparing elevation values across products.</p>
+  </dialog>
+  <dialog id="field" class="field-tablet" aria-labelledby="field-title">
+    <header class="field-header"><div><h2 id="field-title">Marswalk field mode</h2><p id="field-context" class="small muted"></p></div><button id="field-close" aria-label="Close field mode">Close</button></header>
+    <div class="field-grid">
+      <div class="field-navigation">
+        <div class="field-readouts"><div><span>Distance remaining</span><strong id="field-distance"></strong></div><div><span>Time remaining</span><strong id="field-time"></strong></div><div><span>Tasks complete</span><strong id="field-count"></strong></div></div>
+        <div class="field-route"><svg id="field-map" viewBox="0 0 520 286" role="img" aria-label="Selected Marswalk route"></svg></div>
+        <div class="field-playback"><button id="field-play">Simulate next leg</button><button id="field-reset">Restart walk</button></div>
+        <label class="field-scrub">Field progress<input id="field-progress" type="range" min="0" max="1000" value="0"></label>
+        <p id="field-timeline" class="small muted"></p>
+      </div>
+      <div class="field-brief">
+        <section class="field-next"><p>Next waypoint</p><h3 id="field-next"></h3><p id="field-objective"></p></section>
+        <section class="field-warnings"><h3>Planning warnings</h3><ul id="field-warnings"></ul></section>
+        <section class="field-tasks"><h3>Science checklist</h3><div id="field-tasks"></div></section>
+      </div>
+    </div>
+    <footer class="field-footer"><p id="field-status" role="status" class="small muted"></p><button id="field-export">Export field report</button></footer>
   </dialog>
 </body>
 </html>

@@ -5,10 +5,11 @@ import test from 'node:test';
 import {distance, lonLat, MARS_RADIUS, normalizePoint, wrap, xyz} from '../dist/nav/geo.js';
 import {contains, createGrid, nodePoint, sample} from '../dist/nav/elevation.js';
 import {camera, displayElevation, intersectRelief, intersectSphere, project, ray, reliefMesh, terrainModel} from '../dist/nav/graphics.js';
-import {explain, findPath, planMission} from '../dist/nav/routing.js';
+import {explain, findPath, hazardMask, loadedSpeed, planMission} from '../dist/nav/routing.js';
 import {makeReport} from '../dist/nav/report.js';
 import {atStop, fieldPosition, fieldStatus} from '../dist/nav/field-model.js';
 import {REGIONAL_IMAGERY, THERMAL_IMAGERY} from '../dist/science.js';
+import {JEZERO_MISSION} from '../dist/nav/mission-demo.js';
 import {archiveItem} from '../dist/nav/archive-grid.js';
 
 const settings = {objective:'balanced', speed:.8, maxSlope:15, maxMinutes:180, maxKm:6, stopMinutes:10, terrainWeight:2};
@@ -221,4 +222,37 @@ test('Each bundled regional mesh joins measured surrounding relief and can be pi
     const hit = intersectRelief([x, y + 20, z], [0,-1,0], mesh);
     assert.ok(hit && Math.abs(hit[1] - y) * model.meters / model.exaggeration < 25, entry.id);
   }
+});
+
+test('Slope routing applies a user-marked no-go mask and blocks diagonal corner cuts', () => {
+  const grid = synthetic(new Array(49).fill(0), 7);
+  const zone = {...nodePoint(grid, 3, 3), radius:40};
+  const mask = hazardMask(grid,[zone]);
+  assert.equal(mask[24],1);
+  const direct = findPath(grid,21,27,'shortest',settings);
+  assert.ok(direct.includes(24));
+  const detour = findPath(grid,21,27,'shortest',settings,mask);
+  assert.ok(detour.every(index=>!mask[index]));
+  assert.equal(findPath(grid,21,24,'shortest',settings,mask),null);
+});
+
+test('Jezero demo routes all three required stops and computes paired and rover leg margins', async () => {
+  const entry = catalog.regions.find(region=>region.id === 'jezero');
+  const grid = createGrid(entry,await json(entry.url));
+  const waypoints = JEZERO_MISSION.stops.map((stop,index)=>({...stop,id:`demo-${index}`,selected:true,required:true}));
+  const mission = {...entry.demo,waypoints,settings:JEZERO_MISSION.settings};
+  const [pair] = planMission(grid,mission);
+  assert.equal(pair.stops.length,3);
+  assert.ok(pair.support.legs.every(leg=>leg.minutes > 0));
+  close(pair.levelSpeed,loadedSpeed(mission.settings));
+  close(pair.support.legs.reduce((total,leg)=>total + leg.minutes,0),pair.travelMinutes);
+  assert.ok(pair.equipmentMargin > 0);
+  const rover = planMission(grid,{...mission,settings:{...mission.settings,crewMode:'rover'}})
+    .find(route=>route.mode === pair.mode);
+  assert.ok(rover && rover.support.legs[0].mode === 'Rover');
+  assert.ok(rover.support.rendezvous.station < rover.stops[0].station);
+  close(rover.points.at(-1).travelMinutes, rover.travelMinutes);
+  close(rover.points.at(-1).walkMinutes, rover.walkMinutes);
+  close(rover.minutes, rover.travelMinutes + rover.stopMinutes);
+  assert.ok(rover.walkMinutes < pair.walkMinutes);
 });

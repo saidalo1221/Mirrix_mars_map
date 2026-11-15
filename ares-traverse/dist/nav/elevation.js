@@ -1,4 +1,4 @@
-import {clamp, wrap} from './geo.js';
+import {clamp, distance, wrap} from './geo.js';
 
 const directory = new URL('../assets/terrain/', import.meta.url);
 
@@ -82,4 +82,18 @@ export function sample(grid, point) {
     elevation += value * weight;
   }
   return elevation;
+}
+
+export function sampleSlope(grid, point) {
+  if (!contains(grid, point)) return null;
+  const {x, y} = gridPosition(grid, point);
+  const col = Math.round(x), row = Math.round(y);
+  if (col <= 0 || row <= 0 || col >= grid.width - 1 || row >= grid.height - 1) return null;
+  const value = (c, r) => grid.values[r * grid.width + c];
+  const gradient = (c0, r0, c1, r1) => (value(c1, r1) - value(c0, r0)) /
+    distance(nodePoint(grid, c0, r0), nodePoint(grid, c1, r1));
+  if (!Number.isFinite(value(col, row))) return null;
+  const degrees = Math.atan(Math.hypot(gradient(col - 1, row, col + 1, row),
+    gradient(col, row - 1, col, row + 1))) * 180 / Math.PI;
+  return Number.isFinite(degrees) ? degrees : null;
 }

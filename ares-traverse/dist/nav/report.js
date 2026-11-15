@@ -4,7 +4,10 @@ import {equipmentLimit, withinBudgets} from './routing.js';
 
 export const ASSUMPTIONS = [
   'Educational mission concept. The terrain grid cannot establish astronaut footpath safety.',
-  'Walk time is hypothetical and uses the configured speed, directional grade penalty, and time at planned stops.',
+  'Travel time uses hypothetical speed, directional grade, carried-load, and science dwell assumptions.',
+  'Carried load uses speed / (1 + kg / 50). This illustrative relationship is not calibrated to Mars EVA.',
+  'Optional rover time uses a user-entered constant speed on the modeled grid path. Mobility constraints and equipment limits apply across the full traverse.',
+  'User-marked no-go areas are planning inputs. The DEM cannot validate individual boulder fields or local hazards.',
   'Route geometry connects DEM sample centers. Selected points snap to their nearest valid grid node; no off-grid segment is estimated.',
   'Search compares a finite set of paths and evaluates distance and time budgets after generation.',
   'Display relief uses 3× vertical exaggeration. Analysis uses unexaggerated numerical elevations.',
@@ -14,7 +17,7 @@ export const ASSUMPTIONS = [
 ];
 
 export function makeReport({name, region, start, end, settings, waypoints, routes, active, layer, regionalImagery,
-  thermalImagery, activeRegionalLayer, recommendation, fieldLogs = new Map(), progress = 0, now = new Date()}) {
+  thermalImagery, activeRegionalLayer, scienceLayers, hazards = [], missionGoal, recommendation, fieldLogs = new Map(), progress = 0, now = new Date()}) {
   const selected = routes.find(route => route.id === active) ?? routes[0];
   const snapshot = fieldStatus(selected, settings, progress, fieldLogs.get(selected.id) ?? {});
   const asset = source => source ? {name:source.name, url:source.sourceUrl, credit:source.attribution} : null;
@@ -29,7 +32,7 @@ export function makeReport({name, region, start, end, settings, waypoints, route
       interpretation:thermalImagery.interpretation} : null,
     activeRegionalLayer: activeRegionalLayer ?? 'topography',
     equipmentUsableMinutes: equipmentLimit(settings),
-    start, destination: end, settings, waypoints, recommendation,
+    start, destination: end, settings, waypoints, hazards, missionGoal:missionGoal ?? null, scienceLayers:scienceLayers ?? null, recommendation,
     recommendedRoute: routes[0].id, selectedRoute: active,
     routes: routes.map(({points, ...metrics}) => ({...metrics, geometry: {type: 'LineString',
       coordinates: points.map(point => [point.lon, point.lat, point.elevation])}, stationsMeters: points.map(point => point.station)})),
@@ -38,7 +41,7 @@ export function makeReport({name, region, start, end, settings, waypoints, route
       distanceRemainingMeters: snapshot.distance, estimatedMinutesRemaining: snapshot.remaining,
       modeledEquipmentMinutesRemaining: snapshot.equipmentRemaining,
       scienceTasks: routes.flatMap(route => route.stops.map(stop => ({
-        route:route.id, id:stop.id, name:stop.name, objective:stop.description ?? null, stationMeters:stop.station,
+        route:route.id, id:stop.id, number:stop.number, label:stop.label, name:stop.name, objective:stop.description ?? null, stationMeters:stop.station,
         completedAt:fieldLogs.get(route.id)?.[stop.id]?.completedAt ?? null, notes:fieldLogs.get(route.id)?.[stop.id]?.notes ?? '',
       }))),
     },
@@ -68,6 +71,7 @@ export function printReport(container, report) {
   add('p', `Start ${coordinates(report.start)} · Destination ${coordinates(report.destination)}`);
   add('p', report.coordinateReference);
   add('p', report.recommendation);
+  if (report.missionGoal) add('p', report.missionGoal);
   add('h2', 'Route comparison');
   const table = add('table', '');
   const rows = [['Route', 'Distance', 'Time', 'Ascent / descent', 'Max slope', 'Budget']];
@@ -87,12 +91,18 @@ export function printReport(container, report) {
     `Assumed equipment support ${settings.equipmentMinutes} min · Reserved ${settings.reserveMinutes} min · Usable ${report.equipmentUsableMinutes} min`);
   const route = report.routes.find(candidate => candidate.id === report.selectedRoute);
   add('p', `Selected route ${route.id} · ${route.geometry.coordinates.length} DEM nodes · Full geometry in the JSON export`);
-  for (const point of route.stops) add('p', `${point.name} · ${coordinates(point)}. ${point.description ?? ''}`);
+  for (const point of route.stops) add('p', `${point.label ? point.label + " · " : ""}${point.name} · ${coordinates(point)}. ${point.description ?? ''}`);
   const simulation = report.fieldSimulation;
+  if (route.support) {
+    add('p', `Rendezvous at ${coordinates(route.support.rendezvous)}`);
+    for (const leg of route.support.legs) add('p', `${leg.mode} · ${(leg.meters / 1000).toFixed(2)} km · ${leg.minutes.toFixed(1)} min`);
+  }
+  for (const zone of report.hazards) add('p', `User-marked no-go · ${zone.name} · ${zone.radius} m radius · ${coordinates(zone)}`);
+  add('p', `EVA time margin · ${route.timeMargin.toFixed(1)} min${route.equipmentMargin === null ? '' : ' · Equipment margin ' + route.equipmentMargin.toFixed(1) + ' min'}`);
   add('h2', 'Simulated field record');
   add('p', `Route ${simulation.route} · ${(simulation.distanceTraversedMeters / 1000).toFixed(2)} km traversed · ${simulation.estimatedMinutesRemaining.toFixed(1)} min estimated remaining`);
   for (const task of simulation.scienceTasks.filter(task => task.route === simulation.route)) {
-    add('p', `${task.name} · ${task.completedAt ? 'Completed in simulation' : 'Open'}${task.notes ? ' · ' + task.notes : ''}`);
+    add('p', `${task.label ? task.label + " · " : ""}${task.name} · ${task.completedAt ? 'Completed in simulation' : 'Open'}${task.notes ? ' · ' + task.notes : ''}`);
   }
   add('h2', 'Sources and assumptions');
   add('p', `${report.region.source} · ${report.region.resolutionMeters} m · ${report.region.datum}`);

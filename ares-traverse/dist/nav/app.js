@@ -1,6 +1,8 @@
 import * as science from '../science.js';
+import {createField} from './field.js';
+import {JEZERO_MISSION, RADIATION_SOURCES} from './mission-demo.js';
 import {coordinates, normalizePoint, clamp} from './geo.js';
-import {contains, getTerrainCatalog, gridPosition, loadContextGrid, loadGrid, sample} from './elevation.js';
+import {contains, getTerrainCatalog, gridPosition, loadContextGrid, loadGrid, sample, sampleSlope} from './elevation.js';
 import {explain, OBJECTIVES, planMission, withinBudgets} from './routing.js';
 import {MarsMap, ROUTE_COLORS} from './map.js';
 import {downloadReport, makeReport, printReport} from './report.js';
@@ -18,12 +20,17 @@ const elevationFormat = new Intl.NumberFormat('en', {maximumFractionDigits: 0, s
 const resolution = meters => Number(meters.toFixed(1));
 const state = {catalog: null, global: null, grid: null, region: null, start: null, end: null,
   selected: LANDMARKS.find(point => point.id === 'jezero') ?? {lat: 18.44, lon: 77.45},
-  waypoints: [], routes: [], active: null, progress: 0, revision: 0, routeProgress: new Map(),
+  waypoints: [], hazards: [], fieldLogs: new Map(), routes: [], active: null, progress: 0, revision: 0, routeProgress: new Map(),
   regionalScience: 'topography'};
 const archiveGrids = new Map();
-const settingKeys = ['maxMinutes', 'maxKm', 'speed', 'maxSlope', 'terrainWeight', 'stopMinutes', 'equipmentMinutes', 'reserveMinutes'];
+let stopSequence = 0;
+let pointMenu = null;
+const pointHistory = [];
+const numberedStops = () => state.waypoints.map((point, index) => ({...point, number:index + 1, label:`Stop ${index + 1}`}));
+const settingKeys = ['maxMinutes', 'maxKm', 'speed', 'maxSlope', 'terrainWeight', 'stopMinutes', 'equipmentMinutes', 'reserveMinutes', 'carriedKg', 'roverSpeed'];
 const map = new MarsMap(get('surface'), {
-  select: point => selectPoint(point),
+  select: point => {showInspector('location'); selectPoint(point);},
+  place:openPointMenu, cancelPoint:closePointMenu, anchor:anchorPointMenu,
   hover: value => { get('hover-coordinates').textContent = value || modeInstructions(); },
   fallback: () => { changeMode('map'); mapStatus('WebGL unavailable. Explore and plan in 2D.', true); },
 });
@@ -86,6 +93,7 @@ function changeMode(requested, focus = state.selected) {
     map.center = {lat: point.lat, lon: point.lon};
     map.zoom = zoom;
   }
+  document.body.dataset.view = map.mode;
   const terrain = map.mode === 'terrain';
   get('map-heading').textContent = terrain ? 'Regional terrain' : map.mode === 'globe' ? 'Mars globe' : 'Mars map';
   get('map-kind').textContent = terrain ? 'ELEVATION RELIEF' : 'GLOBAL IMAGERY';
@@ -104,16 +112,17 @@ function changeMode(requested, focus = state.selected) {
 function renderLayerCredit() {
   const layer = state.layer;
   const regional = map.regionalLayer;
+  const blending = state.regionalScience === 'blend' && map.mode !== 'globe';
   const context = map.contextLayer;
   get('layer-credit').textContent = map.mode === 'terrain' ?
-    `${state.grid?.source ?? ''} · ${regional?.attribution ?? 'Elevation tint'}` +
+    `${state.grid?.source ?? ''} · ${blending ? 'Layer credits in Regional science' : regional?.attribution ?? 'Elevation tint'}` +
     (context && context !== regional ? ` · ${context.name}` : '') +
     (map.contextGrid ? ` · MOLA surroundings (${map.contextGrid.wrapLongitude ? '14.8 km' : '463 m'} source)` : ' · Surrounding elevation unavailable') +
     ' · Routing inside dashed boundary' :
     layer ? layer.attribution + (map.mode === 'map' && state.grid ? ` · ${regional?.attribution ?? 'DEM elevation tint'} at regional zoom` +
       (context && context !== regional ? ` · ${context.name} surroundings` : '') : '') : 'Imagery loading…';
   get('layer').title = map.mode === 'terrain' ? 'Global imagery supplies context beyond the local mosaic.' : '';
-  get('map-kind').textContent = map.mode === 'globe' ? 'GLOBAL IMAGERY' :
+  get('map-kind').textContent = map.mode === 'globe' ? 'GLOBAL IMAGERY' : blending ? 'BLENDED SCIENCE LAYERS' :
     regional?.id === THERMAL_IMAGERY[state.region?.id]?.id && regional ? 'THEMIS THERMAL IR' :
       regional ? 'OPTICAL IMAGERY' : state.grid ? 'NUMERICAL TOPOGRAPHY' : 'GLOBAL IMAGERY';
 }
@@ -123,17 +132,45 @@ function renderRegionalControls() {
   get('regional-layers').hidden = !state.grid;
   for (const button of document.querySelectorAll('[data-science-layer]')) {
     const type = button.dataset.scienceLayer;
-    const available = type === 'topography' || Boolean((type === 'optical' ? REGIONAL_IMAGERY : THERMAL_IMAGERY)[id]);
+    const available = ['topography','blend'].includes(type) || Boolean((type === 'optical' ? REGIONAL_IMAGERY : THERMAL_IMAGERY)[id]);
     button.disabled = !available;
     button.setAttribute('aria-pressed', String(type === state.regionalScience));
   }
-  const note = state.regionalScience === 'thermal' ? THERMAL_IMAGERY[id]?.interpretation :
+  get('layer-blend').hidden = state.regionalScience !== 'blend';
+  get('optical-opacity').disabled = !REGIONAL_IMAGERY[id];
+  get('thermal-opacity').disabled = !THERMAL_IMAGERY[id];
+  const legend = get('regional-layer-legend');
+  legend.replaceChildren();
+  if (state.grid) {
+    const items = [
+      ['Optical · image detail', REGIONAL_IMAGERY[id]],
+      ['Topography · dark lower, light higher', {...state.grid, attribution:`${resolution(state.grid.resolutionMeters)} m · ${state.grid.datum} · ${state.grid.source}`}],
+      ['Thermal IR · dark to bright infrared signal', THERMAL_IMAGERY[id]],
+    ];
+    for (const [label, source] of items) {
+      const item = element('li', label);
+      item.append(element('small', source?.attribution ?? 'Unavailable in this region.'));
+      if (source?.sourceUrl) item.append(link('Source ↗',source.sourceUrl));
+      legend.append(item);
+    }
+  }
+  const note = state.regionalScience === 'blend' ? 'Adjust the data layers over the regional context image.' : state.regionalScience === 'thermal' ? THERMAL_IMAGERY[id]?.interpretation :
     state.regionalScience === 'optical' ? REGIONAL_IMAGERY[id]?.attribution :
       state.grid ? `${resolution(state.grid.resolutionMeters)} m DEM · ${state.grid.datum}. ${THERMAL_IMAGERY[id] ? '' : 'Regional thermal overlay unavailable.'}` : '';
   get('regional-science-note').textContent = note ?? '';
 }
 
 let scienceRequest = 0;
+const mixKeys = ['optical','topography','thermal'];
+function blendOpacities() {
+  return Object.fromEntries(mixKeys.map(key => [key, Number(get(`${key}-opacity`).value) / 100]));
+}
+async function applyBlend() {
+  const id = state.region?.id;
+  const opacity = blendOpacities();
+  const layers = [['optical',REGIONAL_IMAGERY[id]], ['thermal',THERMAL_IMAGERY[id]]];
+  return map.setRegionalLayers(layers.filter(([,layer]) => layer).map(([kind,layer]) => ({layer, opacity:opacity[kind]})), opacity.topography);
+}
 async function selectRegionalScience(type) {
   const request = ++scienceRequest;
   const layer = (type === 'optical' ? REGIONAL_IMAGERY : type === 'thermal' ? THERMAL_IMAGERY : {})[state.region?.id];
@@ -147,7 +184,8 @@ async function selectRegionalScience(type) {
   renderRegionalControls();
   if (layer) mapStatus(`Loading ${layer.name}…`);
   try {
-    if (!await map.setRegionalImagery(layer) || request !== scienceRequest) return;
+    const loaded = await (type === 'blend' ? applyBlend() : map.setRegionalImagery(layer));
+    if (!loaded || request !== scienceRequest) return;
     renderLayerCredit();
     mapStatus('');
   } catch (error) {
@@ -163,10 +201,11 @@ function updateOverlay() {
   const route = state.routes.find(route => route.id === state.active);
   const position = route && state.progress > 0 ? route.points.find(point => point.station >= route.length * state.progress) : null;
   map.setOverlay({landmarks: LANDMARKS, routes: state.routes, active: state.active, start: state.start, end: state.end,
-    selected: state.selected, waypoints: state.waypoints.filter(point => point.selected), progress: position});
+    selected: state.selected, waypoints: numberedStops(), progress: position, temporary:pointMenu?.point, rendezvous:route?.support?.rendezvous, hazards:state.hazards});
 }
 
 function selectPoint(point, focus = false) {
+  if (focus) showInspector('location');
   state.selected = point;
   if (focus) {
     if (map.mode === 'terrain' && !contains(state.grid, point)) changeMode('globe', point);
@@ -189,8 +228,9 @@ function renderInspector() {
   get('elevation-source').textContent = value === null ? (state.globalError ?? 'Numerical elevation loading or unavailable here.') :
     `${grid.source} · ${grid.resolutionMeters >= 1000 ? (grid.resolutionMeters / 1000).toFixed(1) + ' km' : resolution(grid.resolutionMeters) + ' m'} · ${grid.datum} · interpolated`;
   get('add-stop').disabled = regionalValue === null;
-  get('set-start').disabled = regionalValue === null;
-  get('set-start').title = regionalValue === null ? 'Select a point inside the active regional DEM.' : '';
+  get('set-start').title = regionalValue === null ? 'A route still needs a regional DEM that covers both endpoints.' : '';
+  get('undo-point').disabled = !pointHistory.length;
+  get('clear-points').disabled = !state.start && !state.end && !state.waypoints.length && !state.hazards.length;
   for (const key of ['start', 'end']) {
     get(`${key}-value`).textContent = state[key] ? coordinates(state[key]) : 'Choose a surface point';
   }
@@ -228,8 +268,20 @@ function renderWaypoints() {
   const panel = get('waypoints');
   panel.replaceChildren();
   if (!state.waypoints.length) panel.append(element('p', 'Select a surface point to add an observation stop.', 'muted small'));
-  for (const point of state.waypoints) {
+  for (const [index, point] of state.waypoints.entries()) {
+    const label = `Stop ${index + 1}`;
     const card = element('div', undefined, 'waypoint');
+    card.id = `stop-${point.id}`;
+    const nameLabel = element('label', 'Stop name');
+    const name = element('input');
+    name.value = point.name;
+    name.maxLength = 80;
+    name.onchange = () => {
+      point.name = name.value.trim() || 'Surface observation';
+      name.value = point.name;
+      invalidateMission();
+    };
+    nameLabel.append(name);
     const objective = element('label', 'Observation objective');
     const description = element('input');
     description.value = point.description ?? '';
@@ -240,14 +292,14 @@ function renderWaypoints() {
       invalidateMission();
     };
     objective.append(description);
-    card.append(element('h3', point.name), objective);
+    card.append(element('h3', label), nameLabel, objective);
     const controls = element('div', undefined, 'waypoint-actions');
     for (const [key, label] of [['selected', 'Include'], ['required', 'Require']]) {
       const input = element('input');
       input.type = 'checkbox';
       input.checked = point[key];
       input.disabled = key === 'required' && !point.selected;
-      input.setAttribute('aria-label', `${label} ${point.name}`);
+      input.setAttribute('aria-label', `${label} Stop ${index + 1}`);
       input.onchange = () => {
         point[key] = input.checked;
         if (!point.selected) point.required = false;
@@ -261,14 +313,40 @@ function renderWaypoints() {
     const focus = element('button', 'Locate');
     focus.onclick = () => selectPoint(point, true);
     const remove = element('button', 'Remove');
-    remove.setAttribute('aria-label', `Remove ${point.name}`);
+    remove.setAttribute('aria-label', `Remove ${label}`);
     remove.onclick = () => {
-      state.waypoints = state.waypoints.filter(waypoint => waypoint !== point);
+      rememberPoints();
+      state.waypoints = state.waypoints.filter(waypoint => waypoint.id !== point.id);
       invalidateMission();
       renderWaypoints();
     };
-    controls.append(focus, remove);
+    controls.append(focus);
+    for (const [offset, direction] of [[-1, 'up'], [1, 'down']]) {
+      const move = element('button', direction === 'up' ? '↑' : '↓');
+      const next = index + offset;
+      move.setAttribute('aria-label', `Move ${label} ${direction}`);
+      move.disabled = next < 0 || next >= state.waypoints.length;
+      move.onclick = () => {
+        [state.waypoints[index], state.waypoints[next]] = [state.waypoints[next], state.waypoints[index]];
+        renderWaypoints();
+        invalidateMission();
+        const moved = document.getElementById(card.id);
+        const counterpart = moved?.querySelector(`[aria-label="Move Stop ${next + 1} ${direction}"]`);
+        (counterpart?.disabled ? moved?.querySelector('input') : counterpart)?.focus();
+      };
+      controls.append(move);
+    }
+    controls.append(remove);
     card.append(controls);
+    if (point.photo) {
+      const image = element('img');
+      image.src = point.photo.url;
+      image.alt = point.photo.caption;
+      image.loading = 'lazy';
+      const caption = element('small', `Regional reference view. ${point.photo.caption} ${point.photo.credit} `);
+      caption.append(link('NASA image ↗',point.photo.sourceUrl));
+      card.append(image, caption);
+    }
     panel.append(card);
   }
 }
@@ -279,6 +357,7 @@ function invalidateMission() {
   state.active = null;
   state.progress = 0;
   state.routeProgress.clear();
+  state.fieldLogs.clear();
   setPlayback(false);
   get('progress').value = 0;
   get('plan').disabled = !state.grid || !state.start || !state.end;
@@ -419,11 +498,14 @@ async function selectRegion(entry) {
   const request = ++regionRequest;
   const changed = entry?.id !== state.region?.id;
   if (changed) {
+    state.missionGoal = null;
+    get('mission-brief').hidden = true;
     scienceRequest++;
     state.grid = null;
     map.grid = null;
     map.contextGrid = null;
     state.regionalScience = 'topography';
+    map.hazardRaster = null;
     map.setRegionalImagery(null);
     map.setContextImagery(null);
     renderRegionalControls();
@@ -441,6 +523,7 @@ async function selectRegion(entry) {
     if (request !== regionRequest) return;
     state.grid = grid;
     map.setGrid(grid, state.global);
+    refreshHazards();
     if (entry.contextDem) loadContextGrid(entry).then(contextGrid => {
       if (request !== regionRequest) return;
       map.setElevationContext(contextGrid);
@@ -458,6 +541,7 @@ async function selectRegion(entry) {
     get('region-detail').textContent = `${resolution(entry.resolutionMeters)} m DEM · ${grid.width} × ${grid.height} samples`;
     if (changed) {
       const center = {lat:map.terrain.lat, lon:map.terrain.lon, name:entry.name};
+      showInspector('location');
       selectPoint(center);
       changeMode(map.mode === 'map' || !map.renderer ? 'map' : 'terrain', center);
       map.focus(center, map.mode === 'map' ? regionalZoom() : terrainZoom());
@@ -467,6 +551,7 @@ async function selectRegion(entry) {
       state.start = contains(grid, state.start ?? {}) ? state.start : null;
       state.end = contains(grid, state.end ?? {}) ? state.end : null;
       state.waypoints = state.waypoints.filter(point => contains(grid, point));
+      state.hazards = state.hazards.filter(zone => contains(grid, zone));
     }
     renderWaypoints();
     renderInspector();
@@ -479,7 +564,7 @@ async function selectRegion(entry) {
 }
 
 function readSettings() {
-  const settings = {objective: get('objective').value};
+  const settings = {objective: get('objective').value, crewMode:get('crewMode').value};
   for (const key of settingKeys) {
     const input = get(key);
     if (!input.value || !input.validity.valid) {
@@ -528,7 +613,7 @@ function generate() {
   if (!settings || !state.grid || !state.start || !state.end) return;
   const id = ++state.revision;
   state.settings = settings;
-  state.pending = {id, grid: state.grid, mission: {start: state.start, end: state.end, waypoints: state.waypoints, settings}};
+  state.pending = {id, grid: state.grid, mission: {start: state.start, end: state.end, waypoints: numberedStops(), hazards:state.hazards, settings}};
   get('plan').disabled = true;
   missionStatus('Searching the regional elevation grid…');
   if (worker) {
@@ -554,6 +639,7 @@ function finishPlan({id, routes, error}) {
   get('progress').value = 0;
   missionStatus(`${routes.length} distinct ${routes.length === 1 ? 'route' : 'routes'} · endpoints snapped to DEM cells`);
   renderRoutes();
+  showInspector('routes');
   updateOverlay();
 }
 
@@ -564,7 +650,7 @@ function renderRoutes() {
   state.recommendation = hasRoutes ? explain(state.routes, state.settings.objective) : '';
   get('recommendation').textContent = state.recommendation || 'Your ranked route alternatives appear here.';
   get('route-count').textContent = hasRoutes ? `${state.routes.length} candidates` : '';
-  get('export').disabled = get('print').disabled = !hasRoutes;
+  get('export').disabled = get('print').disabled = get('field-open').disabled = !hasRoutes;
   for (const [index, route] of state.routes.entries()) {
     const card = element('button', undefined, 'route-card');
     card.type = 'button';
@@ -573,12 +659,16 @@ function renderRoutes() {
     card.style.setProperty('--route', ROUTE_COLORS[index]);
     card.append(
       element('strong', `Route ${route.id} · ${index === 0 ? 'Recommended' : OBJECTIVES[route.mode]}`),
-      element('span', `${(route.length / 1000).toFixed(2)} km · ${route.minutes.toFixed(1)} min · ${route.stops.length} stops`),
+      element('span', `${(route.length / 1000).toFixed(2)} km · ${route.minutes.toFixed(1)} min · ${route.stops.length} stops${route.stops.length ? ': ' + route.stops.map(stop => stop.number).join(', ') : ''}`),
       element('span', `↑ ${route.gain.toFixed(0)} m · ↓ ${route.loss.toFixed(0)} m · max ${route.maxSlope.toFixed(1)}° (${route.maxGrade.toFixed(0)}%)`),
       element('span', `Mean slope ${route.meanSlope.toFixed(1)}° · ${withinBudgets(route) ? 'Within budgets' :
         [!route.withinTime && 'Over time', !route.withinDistance && 'Over distance', !route.withinEquipment && 'Over equipment time'].filter(Boolean).join(' · ')}`,
       withinBudgets(route) ? '' : 'route-bad'),
     );
+    card.append(element('span', `EVA time margin ${route.timeMargin.toFixed(1)} min${route.equipmentMargin === null ? '' :
+      ' · equipment margin ' + route.equipmentMargin.toFixed(1) + ' min'}`));
+    if (route.support) card.append(element('span', route.support.legs.map(leg =>
+      `${leg.mode} ${leg.minutes.toFixed(1)} min`).join(' → ') + ' · rendezvous marked on map'));
     card.onclick = () => {
       if (state.active === route.id) return;
       state.active = route.id;
@@ -643,6 +733,7 @@ function setPlayback(playing) {
 function updateProgress() {
   const route = state.routes.find(route => route.id === state.active);
   if (route) get('progress-value').textContent = `${(route.length * state.progress / 1000).toFixed(2)} km`;
+  field.update();
 }
 
 function seekTraverse(fraction) {
@@ -670,9 +761,10 @@ async function selectLayer(id) {
 }
 
 function report() {
-  return makeReport({...state, name: get('mission-name').value.trim() || 'Mars surface traverse', settings: state.settings,
+  return makeReport({...state, waypoints:numberedStops(), name: get('mission-name').value.trim() || 'Mars surface traverse', settings: state.settings,
     regionalImagery: REGIONAL_IMAGERY[state.region.id], thermalImagery: THERMAL_IMAGERY[state.region.id],
-    activeRegionalLayer: state.regionalScience, progress: state.progress});
+    activeRegionalLayer: state.regionalScience, scienceLayers:state.regionalScience === 'blend' ? blendOpacities() : null,
+    missionGoal:state.missionGoal, progress: state.progress});
 }
 
 function renderSources() {
@@ -702,9 +794,10 @@ function renderSources() {
     productUrl:STAC_COLLECTIONS + id,attribution:source.label === 'HiRISE' ? 'Place, product ID, and destination search' : 'Destination lookup using areoid-adjusted DEMs',
   })));
   group('Orbital imagery', [...new Set([...MAP_LAYERS, ...Object.values(REGIONAL_IMAGERY), ...Object.values(REGIONAL_CONTEXT), ...Object.values(THERMAL_IMAGERY)])]);
-  group('Rover images', LANDMARKS.filter(point => point.photo).map(point => ({
+  group('Rover images', [...LANDMARKS, ...JEZERO_MISSION.stops].filter(point => point.photo).map(point => ({
     name:point.name,sourceUrl:point.photo.sourceUrl,attribution:point.photo.credit,
   })));
+  group('Historical radiation and space weather', RADIATION_SOURCES);
 }
 
 for (const [id, name] of Object.entries(OBJECTIVES)) get('objective').append(option(name, id));
@@ -716,6 +809,10 @@ for (const button of document.querySelectorAll('[data-science-layer]')) {
 }
 for (const point of LANDMARKS) {
   get('landmarks').append(option(point.name,`landmark:${point.id}`));
+  const chip = element('button', point.name);
+  chip.type = 'button';
+  chip.onclick = () => selectPoint(point,true);
+  get('landmark-chips').append(chip);
 }
 function openRegion(entry) {
   get('region').value = entry.id;
@@ -796,25 +893,156 @@ get('model-search').onsubmit = event => {
   queueModelSuggestions(0);
 };
 for (const button of document.querySelectorAll('[data-mode]')) button.onclick = () => changeMode(button.dataset.mode);
-get('set-start').onclick = () => {
-  const {lat, lon} = state.selected;
-  state.start = {lat, lon};
-  invalidateMission();
+function capturePoints() {
+  return {start:state.start, end:state.end, region:state.region, hazards:[...state.hazards], waypoints:state.waypoints.map(point => ({...point}))};
+}
+
+function rememberPoints(snapshot = capturePoints()) {
+  pointHistory.push(snapshot);
+  if (pointHistory.length > 25) pointHistory.shift();
+}
+
+function commitPointChange() {
+  renderWaypoints();
   renderInspector();
-};
-get('set-end').onclick = () => setDestination(state.selected);
-get('add-stop').onclick = () => {
+  invalidateMission();
+}
+
+function setStart(point) {
+  rememberPoints();
+  const {lat, lon} = point;
+  state.start = {lat, lon};
+  commitPointChange();
+}
+
+async function placeDestination(point) {
+  const before = capturePoints();
+  await setDestination(point);
+  if (before.end !== state.end || before.start !== state.start || before.region !== state.region) {
+    rememberPoints(before);
+    renderInspector();
+  }
+}
+
+function addStop(point) {
+  if (sample(state.grid, point) === null) return;
   if (state.waypoints.length >= 6) {
     missionStatus('A mission can include up to six stops.', true);
     return;
   }
-  const {lat, lon, name} = state.selected;
-  state.waypoints.push({id: crypto.randomUUID?.() ?? String(Date.now()), lat, lon,
-    name: name ?? `Observation ${state.waypoints.length + 1}`, selected: true, required: false});
-  renderWaypoints();
-  invalidateMission();
+  rememberPoints();
+  const {lat, lon, name} = point;
+  state.waypoints.push({id: globalThis.crypto?.randomUUID?.() ?? `local-${++stopSequence}`, lat, lon,
+    name: name ?? 'Surface observation', selected: true, required: false});
+  commitPointChange();
+}
+
+function anchorPointMenu(position) {
+  const menu = get('point-menu');
+  if (menu.hidden || !position) return;
+  const [x, y] = position;
+  menu.style.left = `${clamp(x + 13, 8, Math.max(8, map.width - menu.offsetWidth - 8))}px`;
+  const above = y + menu.offsetHeight + 13 > map.height;
+  menu.style.top = `${clamp(above ? y - menu.offsetHeight - 13 : y + 13, 8, Math.max(8, map.height - menu.offsetHeight - 8))}px`;
+}
+
+function closePointMenu(restoreFocus = false) {
+  if (!pointMenu) return;
+  pointMenu = null;
+  get('point-menu').hidden = true;
+  if (restoreFocus === true) get('surface').focus({preventScroll:true});
+  updateOverlay();
+}
+
+function openPointMenu(point, kind, fly) {
+  cancelAnimationFrame(map.inertia);
+  showInspector('location');
+  selectPoint(point);
+  pointMenu = {point, kind};
+  const detailed = sample(state.grid, point);
+  const source = detailed !== null ? state.grid : contains(map.contextGrid, point) ? map.contextGrid : state.global;
+  const value = detailed ?? sample(source, point);
+  const slope = sampleSlope(state.grid, point);
+  const title = kind === 'start' ? 'Start (A)' : kind === 'end' ? 'Destination (B)' : kind === 'stop' ? point.label : kind === 'hazard' ? point.name : 'Place a point';
+  get('point-menu-title').textContent = title;
+  get('point-menu-detail').textContent = [
+    coordinates(point),
+    value === null ? 'Elevation unavailable' : `${elevationFormat.format(value)} m elevation`,
+    slope === null ? 'Local slope unavailable' : `${slope.toFixed(1)}° estimated grid slope`,
+  ].join(' · ');
+  get('place-stop').disabled = detailed === null || state.waypoints.length >= 6;
+  get('place-stop').title = detailed === null ? 'Open a regional DEM that covers this point first.' : '';
+  get('edit-point').hidden = kind !== 'stop';
+  get('remove-point').hidden = !kind;
+  get('place-hazard').disabled = detailed === null || state.hazards.length >= 12;
+  get('hazard-form').hidden = true;
+  get('point-menu').hidden = false;
+  if (fly) {
+    const zoom = map.mode === 'globe' ? Math.max(map.zoom, 3.7) :
+      map.mode === 'map' ? Math.max(map.zoom, detailed !== null ? regionalZoom() : 6) : Math.max(map.zoom, 1.9);
+    map.focus(point, zoom);
+  }
+  anchorPointMenu(map.location(point));
+  updateOverlay();
+  get(kind === 'stop' ? 'edit-point' : 'place-start').focus({preventScroll:true});
+}
+
+function pointAction(action) {
+  return () => {
+    const choice = pointMenu;
+    if (!choice) return;
+    closePointMenu(true);
+    action(choice);
+  };
+}
+
+get('set-start').onclick = () => setStart(state.selected);
+get('set-end').onclick = () => placeDestination(state.selected);
+get('add-stop').onclick = () => addStop(state.selected);
+get('place-start').onclick = pointAction(({point}) => setStart(point));
+get('place-end').onclick = pointAction(({point}) => placeDestination(point));
+get('place-stop').onclick = pointAction(({point}) => addStop(point));
+get('inspect-point').onclick = pointAction(({point}) => selectPoint(point));
+get('cancel-point').onclick = () => closePointMenu(true);
+get('edit-point').onclick = pointAction(({point}) => {
+  showInspector('location');
+  document.getElementById(`stop-${point.id}`)?.querySelector('input')?.focus();
+});
+get('remove-point').onclick = pointAction(({point, kind}) => {
+  rememberPoints();
+  if (kind === 'stop') state.waypoints = state.waypoints.filter(stop => stop.id !== point.id);
+  else if (kind === 'hazard') state.hazards = state.hazards.filter(zone => zone.id !== point.id);
+  else state[kind] = null;
+  commitPointChange();
+});
+get('undo-point').onclick = async () => {
+  const previous = pointHistory.pop();
+  if (!previous) return;
+  if (previous.region !== state.region) {
+    get('region').value = previous.region?.id ?? '';
+    await selectRegion(previous.region);
+  }
+  state.start = previous.start;
+  state.end = previous.end;
+  state.waypoints = previous.waypoints;
+  state.hazards = previous.hazards;
+  commitPointChange();
 };
-for (const key of [...settingKeys, 'objective']) get(key).addEventListener('input', invalidateMission);
+get('clear-points').onclick = () => {
+  if (!confirm('Clear the endpoints, science stops, and user-marked no-go areas?')) return;
+  rememberPoints();
+  state.start = state.end = null;
+  state.waypoints = [];
+  state.hazards = [];
+  commitPointChange();
+};
+get('dismiss-place-hint').onclick = () => {
+  get('place-hint').hidden = true;
+  try { localStorage.setItem('ares-placement-hint', 'seen'); } catch {}
+};
+try { get('place-hint').hidden = localStorage.getItem('ares-placement-hint') === 'seen'; } catch {}
+
+for (const key of [...settingKeys, 'objective', 'crewMode']) get(key).addEventListener('input', invalidateMission);
 get('plan').onclick = () => generate();
 get('export').onclick = () => downloadReport(report());
 get('print').onclick = () => printReport(get('print-report'), report());
@@ -824,6 +1052,12 @@ get('recenter').onclick = () => {
   if (map.mode === 'terrain' && !contains(state.grid,state.selected)) changeMode('globe',state.selected);
   map.focus(state.selected);
 };
+function syncModeControls() {
+  const workspace = get('planning-workspace');
+  const enlarged = document.fullscreenElement === workspace || workspace.classList.contains('fullscreen-fallback');
+  get(enlarged ? 'fullscreen-view-controls' : 'header-view-controls').append(get('mode-switch'));
+}
+document.addEventListener('fullscreenchange', syncModeControls);
 get('fullscreen').onclick = async () => {
   const workspace = get('planning-workspace');
   if (document.fullscreenElement) await document.exitFullscreen();
@@ -832,9 +1066,14 @@ get('fullscreen').onclick = async () => {
     try { await workspace.requestFullscreen(); }
     catch { workspace.classList.add('fullscreen-fallback'); }
   }
+  syncModeControls();
 };
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') get('planning-workspace').classList.remove('fullscreen-fallback');
+  if (event.key === 'Escape' && pointMenu) closePointMenu(true);
+  else if (event.key === 'Escape') {
+    get('planning-workspace').classList.remove('fullscreen-fallback');
+    syncModeControls();
+  }
 });
 get('sources-button').onclick = () => get('sources').showModal();
 get('play').onclick = () => setPlayback(!playback);
@@ -843,6 +1082,94 @@ get('progress').oninput = event => {
   seekTraverse(Number(event.target.value) / 1000);
 };
 
+get('place-hazard').onclick = () => {
+  get('hazard-form').hidden = !get('hazard-form').hidden;
+  if (!get('hazard-form').hidden) get('hazard-type').focus();
+  anchorPointMenu(map.location(pointMenu.point));
+};
+get('hazard-form').onsubmit = event => {
+  event.preventDefault();
+  const point = pointMenu?.point;
+  if (!point || !get('hazard-radius').validity.valid || sample(state.grid, point) === null || state.hazards.length >= 12) return;
+  rememberPoints();
+  state.hazards.push({id:`hazard-${++stopSequence}`, lat:point.lat, lon:point.lon,
+    name:get('hazard-type').value, radius:get('hazard-radius').valueAsNumber, provenance:'User-marked planning restriction'});
+  closePointMenu(true);
+  commitPointChange();
+};
+
+function refreshHazards() {
+  const enabled = get('show-hazards').checked;
+  get('hazard-legend').hidden = !enabled;
+  get('hazard-note').hidden = !enabled;
+  map.setHazardOverlay(enabled, get('maxSlope').valueAsNumber);
+}
+get('show-hazards').onchange = refreshHazards;
+get('maxSlope').addEventListener('change', refreshHazards);
+for (const key of mixKeys) {
+  const input = get(`${key}-opacity`);
+  input.oninput = () => {
+    get(`${key}-opacity-value`).textContent = `${input.value}%`;
+    applyBlend().catch(error => mapStatus(error.message,true));
+  };
+}
+
+const field = createField({
+  current:() => ({route:state.routes.find(route => route.id === state.active), settings:state.settings,
+    progress:state.progress, log:state.fieldLogs.get(state.active) ?? {}, region:state.region,
+    thermal:THERMAL_IMAGERY[state.region?.id], missionObjective:OBJECTIVES[state.settings?.objective]}),
+  seek:seekTraverse,
+  saveTask:(id, change) => {
+    const log = state.fieldLogs.get(state.active) ?? {};
+    log[id] = {...log[id], ...change};
+    state.fieldLogs.set(state.active, log);
+  },
+  restart:() => seekTraverse(0),
+  exportReport:() => downloadReport(report()),
+});
+get('field-open').onclick = () => {setPlayback(false); field.open();};
+get('demo').onclick = async () => {
+  const entry = state.catalog.regions.find(region => region.id === 'jezero');
+  if (!entry) return;
+  const before = capturePoints();
+  await openRegion(entry);
+  if (state.region !== entry || !state.grid) return;
+  rememberPoints(before);
+  state.start = entry.demo.start;
+  state.end = entry.demo.end;
+  state.waypoints = JEZERO_MISSION.stops.map((stop, index) => ({...stop, id:`jezero-demo-${index + 1}`, selected:true, required:true}));
+  state.hazards = [];
+  state.missionGoal = JEZERO_MISSION.goal;
+  for (const [key,value] of Object.entries(JEZERO_MISSION.settings)) get(key).value = value;
+  get('mission-name').value = JEZERO_MISSION.name;
+  get('mission-brief').textContent = `Jezero western fan · ${JEZERO_MISSION.goal}`;
+  get('mission-brief').hidden = false;
+  refreshHazards();
+  showInspector('location');
+  commitPointChange();
+  missionStatus('Demo ready. Select Generate routes.');
+};
+
+function showInspector(view) {
+  for (const id of ['location','routes']) {
+    const active = id === view;
+    const tab = get(`${id}-tab`);
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+    get(`${id}-panel`).hidden = !active;
+  }
+}
+for (const id of ['location','routes']) {
+  const tab = get(`${id}-tab`);
+  tab.onclick = () => showInspector(id);
+  tab.onkeydown = event => {
+    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const target = event.key === 'Home' ? 'location' : event.key === 'End' ? 'routes' : id === 'location' ? 'routes' : 'location';
+    showInspector(target);
+    get(`${target}-tab`).focus();
+  };
+}
 changeMode('globe');
 renderSources();
 renderInspector();
@@ -851,6 +1178,7 @@ if (MAP_LAYERS.length) selectLayer(MAP_LAYERS[0].id);
 else mapStatus('Global imagery unavailable.', true);
 getTerrainCatalog().then(catalog => {
   state.catalog = catalog;
+  get('demo').disabled = !catalog.regions.some(entry => entry.id === 'jezero');
   for (const entry of catalog.regions) {
     get('region').append(option(entry.name,entry.id));
     get('place-regions').append(option(entry.name,entry.id));

@@ -16,11 +16,13 @@ Open [ARES Navigator](http://127.0.0.1:4173/) in a recent browser. The site runs
 
 **Additional routing terrain.** Select a landmark and choose **Open local terrain** in the Surface inspector. All five landmarks have nearby routing regions, including Pangboche Crater at Olympus Mons, the Valles Marineris canyon floor, and an Elysium Planitia lava channel. Mawrth Vallis and Gusev are also available under **Analysis region**. If a destination falls outside a bundled region, the browser queries the USGS HiRISE and CTX archives for an elevation window. Live archive models need internet access.
 
+Select **Load mission demo** for the three-stop Jezero western fan exercise, then select **Generate routes** and **Field mode**. The rover photos are historical regional reference views.
+
 Use **Search HiRISE terrain** under **Analysis region** to look up a terrain model by name or product ID. Select a result to download and open a verified local window. The first search reads the USGS catalog and can take several seconds. Routes run when you click **Generate routes**.
 
-1. Drag Mars, zoom, and change imagery. Switch to **2D map** to inspect the same selected location.
+1. Drag Mars, zoom, and change imagery under **Advanced settings**. Press and hold the globe or 2D map to place a point. With the map focused, move the crosshair with the arrow keys and press Enter.
 2. Select a destination on the map or search for `18.4608, 77.4065` and choose **Set destination**. Navigator opens Jezero terrain. Use **Set start** to choose your own start in the same region. Use **Regional science** to compare optical imagery, topography, and archived daytime infrared imagery.
-3. Inspect the elevation value and datum. Adjust the slope ceiling, walking speed, and optional equipment support time and reserve. To include the fan-front observation, search for `18.449, 77.4135` and choose **Add science stop**. Click **Generate routes** directly below the endpoint buttons.
+3. Inspect the elevation value and datum. Adjust the slope ceiling, walking speed, and optional equipment support time and reserve. To include the fan-front observation, search for `18.449, 77.4135` and choose **Add science stop**. Click **Generate routes** in the Route section.
 4. Compare **Shortest distance** with **Science coverage** by changing the objective and regenerating. The optional fan-front stop changes the highest-ranked route.
 5. Use the playback controls beneath the elevation profile to follow the selected route. Choose **Export JSON** or **Print report** to save the plan.
 

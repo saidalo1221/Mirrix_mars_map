@@ -1,8 +1,11 @@
-import {clamp, coordinates, lonLat, RAD, wrap, xyz} from './geo.js';
-import {contains} from './elevation.js';
+import {clamp, coordinates, distance, lonLat, RAD, MARS_RADIUS, wrap, xyz} from './geo.js';
+import {contains, nodePoint} from './elevation.js';
 import {camera, contextBounds, displayElevation, dot, intersectRelief, intersectSphere, project, ray, reliefMesh, Renderer, terrainModel, textureBounds} from './graphics.js';
 
 export const ROUTE_COLORS = ['#82eadb', '#ff9c62', '#d5a6f8', '#f4d988', '#a5bdff'];
+
+const slopeNeighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+const slopeColors = {missing:[135,151,169,200], steep:[255,63,77,235], near:[255,177,67,210], lower:[55,207,173,74]};
 
 function featheredRaster(image) {
   const canvas = document.createElement('canvas');
@@ -32,6 +35,8 @@ export class MarsMap {
   mode = 'globe';
   overlay = {};
   imageCache = new Map();
+  regionalOverlays = [];
+  topographyOpacity = 1;
 
   constructor(element, callbacks) {
     this.element = element;
@@ -55,6 +60,10 @@ export class MarsMap {
   }
 
   setMode(mode) {
+    this.callbacks.cancelPoint();
+    this.hideCrosshair();
+    cancelAnimationFrame(this.inertia);
+    this.markers = [];
     this.mode = this.renderer ? mode : 'map';
     this.renderCanvas.hidden = this.mode === 'map';
     this.invalidate();
@@ -63,6 +72,7 @@ export class MarsMap {
   setGrid(grid, contextGrid) {
     if (!grid || this.grid === grid) return;
     this.grid = grid;
+    this.hazardRaster = null;
     this.terrain = terrainModel(grid);
     this.setElevationContext(contextGrid);
     const raster = this.topography = document.createElement('canvas');
@@ -125,20 +135,68 @@ export class MarsMap {
     return true;
   }
 
-  async setRegionalImagery(layer) {
+  setRegionalImagery(layer) {
+    return this.setRegionalLayers(layer ? [{layer, opacity:1}] : [], layer ? 0 : 1);
+  }
+
+  async setRegionalLayers(entries, topography) {
     const request = this.regionalImageRequest = (this.regionalImageRequest ?? 0) + 1;
-    this.regionalImage = null;
+    this.topographyOpacity = topography;
+    if (entries.length === this.regionalOverlays.length &&
+        entries.every(({layer}, index) => layer === this.regionalOverlays[index].layer)) {
+      entries.forEach(({opacity}, index) => {this.regionalOverlays[index].opacity = opacity;});
+      this.regionalLayer = this.regionalOverlays.findLast(overlay => overlay.opacity > 0)?.layer ?? null;
+      this.invalidate();
+      return true;
+    }
+    this.regionalOverlays = [];
     this.regionalLayer = null;
     this.invalidate();
-    if (!layer) return true;
-    const image = await this.loadImage(layer);
+    const loaded = await Promise.all(entries.map(async entry => ({...entry, image:await this.loadImage(entry.layer)})));
     if (request !== this.regionalImageRequest) return false;
-    const thermal = Boolean(layer.interpretation);
-    this.regionalImage = thermal ? image : featheredRaster(image);
-    this.regionalLayer = layer;
-    if (this.renderer) this.renderer.setImage(image, this.renderer.regionalTexture);
+    this.regionalOverlays = loaded.map(({layer, image, opacity}) => {
+      const thermal = Boolean(layer.interpretation);
+      if (this.renderer) this.renderer.setImage(image, thermal ? this.renderer.thermalTexture : this.renderer.regionalTexture);
+      return {layer, image:thermal ? image : featheredRaster(image), opacity, thermal};
+    });
+    this.regionalLayer = this.regionalOverlays.findLast(overlay => overlay.opacity > 0)?.layer ?? null;
     this.invalidate();
     return true;
+  }
+
+  setHazardOverlay(enabled, limit) {
+    if (!enabled || !this.grid || !Number.isFinite(limit)) {
+      this.hazardRaster = null;
+      this.invalidate();
+      return;
+    }
+    const {width, height, dx, dy, north, south, west, east, values} = this.grid;
+    const raster = document.createElement('canvas');
+    raster.width = width;
+    raster.height = height;
+    const ctx = raster.getContext('2d');
+    const pixels = ctx.createImageData(width, height);
+    for (let row = 0; row < height; row++) {
+      const across = distance(nodePoint(this.grid, 0, row), nodePoint(this.grid, 1, row));
+      const down = MARS_RADIUS * RAD * dy;
+      for (let col = 0; col < width; col++) {
+        const index = row * width + col, value = values[index];
+        let slope = 0;
+        const missing = !Number.isFinite(value);
+        if (!missing) for (const [x, y] of slopeNeighbors) {
+          if (col + x < 0 || col + x >= width || row + y < 0 || row + y >= height) continue;
+          const neighbor = values[index + x + y * width];
+          if (Number.isFinite(neighbor)) slope = Math.max(slope, Math.atan2(Math.abs(neighbor - value), Math.hypot(x * across, y * down)) / RAD);
+        }
+        pixels.data.set(missing ? slopeColors.missing : slope > limit ? slopeColors.steep :
+          slope >= limit * .8 ? slopeColors.near : slopeColors.lower, index * 4);
+      }
+    }
+    ctx.putImageData(pixels, 0, 0);
+    this.hazardRaster = raster;
+    this.hazardBounds = {west:west - dx / 2, east:east + dx / 2, south:south - dy / 2, north:north + dy / 2};
+    if (this.renderer) this.renderer.setImage(raster, this.renderer.hazardTexture, true);
+    this.invalidate();
   }
 
   async setContextImagery(layer) {
@@ -189,23 +247,74 @@ export class MarsMap {
     });
   }
 
+  hideCrosshair() {
+    this.crosshair = null;
+    this.element.querySelector('#map-crosshair').hidden = true;
+  }
+
+  markerAt(x, y) {
+    return this.markers?.filter(marker => Math.hypot(x - marker.x, y - marker.y) <= 13)
+      .sort((a, b) => Number(Boolean(b.kind)) - Number(Boolean(a.kind)) ||
+        Math.hypot(x - a.x, y - a.y) - Math.hypot(x - b.x, y - b.y))[0];
+  }
+
+  drift(dx, dy) {
+    const step = () => {
+      dx *= .77;
+      dy *= .77;
+      if (Math.hypot(dx, dy) < .3) return;
+      this.pan(dx, dy, false);
+      this.inertia = requestAnimationFrame(step);
+    };
+    this.inertia = requestAnimationFrame(step);
+  }
+
   bindControls() {
     const element = this.element;
     const active = new Map();
-    let drag = 0, pinch = 0;
+    let drag = 0, pinch = 0, hold, velocity;
+    const ring = element.querySelector('#hold-ring');
+    const cancelHold = () => {
+      clearTimeout(hold?.timer);
+      ring.hidden = true;
+      hold = null;
+    };
+    const startHold = (event, origin) => {
+      ring.style.left = `${origin[0]}px`;
+      ring.style.top = `${origin[1]}px`;
+      ring.hidden = false;
+      const timer = setTimeout(() => {
+        const pin = this.markerAt(...origin);
+        const point = pin?.kind ? pin.point : this.pick(...origin);
+        cancelHold();
+        if (!point) return;
+        drag = 20;
+        this.callbacks.place(point, pin?.kind, true);
+      }, 500);
+      hold = {id:event.pointerId, origin, timer};
+    };
     const local = event => {
       const rect = element.getBoundingClientRect();
       return [event.clientX - rect.left, event.clientY - rect.top];
     };
     element.addEventListener('pointerdown', event => {
-      if (event.target.closest('button, a') || (event.button !== 0 && event.button !== 2)) return;
+      if (event.target.closest('button, a, #point-menu') || (event.button !== 0 && event.button !== 2)) return;
       event.preventDefault();
       element.focus({preventScroll:true});
       cancelAnimationFrame(this.transition);
+      cancelAnimationFrame(this.inertia);
+      this.hideCrosshair();
+      this.callbacks.cancelPoint();
       element.setPointerCapture(event.pointerId);
       active.set(event.pointerId, local(event));
-      if (active.size === 1) drag = 0;
+      if (active.size === 1) {
+        drag = 0;
+        velocity = null;
+        if (event.button === 0) startHold(event, local(event));
+      }
       if (active.size === 2) {
+        cancelHold();
+        velocity = null;
         const [a, b] = [...active.values()];
         pinch = Math.hypot(a[0] - b[0], a[1] - b[1]);
         drag = 20;
@@ -215,12 +324,13 @@ export class MarsMap {
       const point = local(event);
       const before = active.get(event.pointerId);
       if (!before) {
-        if (this.mode !== 'terrain' && !event.target.closest('button, a')) {
+        if (this.mode !== 'terrain' && !event.target.closest('button, a, #point-menu')) {
           const hovered = this.pick(...point);
           this.callbacks.hover(hovered ? coordinates(hovered) : '');
         }
         return;
       }
+      if (hold?.id === event.pointerId && Math.hypot(point[0] - hold.origin[0], point[1] - hold.origin[1]) > 6) cancelHold();
       active.set(event.pointerId, point);
       if (active.size === 2) {
         const [a, b] = [...active.values()];
@@ -231,33 +341,70 @@ export class MarsMap {
       }
       const dx = point[0] - before[0], dy = point[1] - before[1];
       drag += Math.hypot(dx, dy);
-      if (drag > 4) this.pan(dx, dy, event.shiftKey || event.buttons === 2);
+      if (drag > 6 && !this.element.querySelector('#point-menu').hidden) return;
+      if (drag > 6) {
+        cancelHold();
+        const tilt = event.shiftKey || event.buttons === 2;
+        this.pan(dx, dy, tilt);
+        velocity = tilt ? null : {dx, dy, time:performance.now()};
+      }
     });
     element.addEventListener('pointerup', event => {
-      if (!active.delete(event.pointerId) || drag > 5 || event.button !== 0) return;
+      if (!active.delete(event.pointerId)) return;
+      cancelHold();
+      if (drag > 6) {
+        if (!active.size && this.mode === 'globe' && velocity && performance.now() - velocity.time < 65)
+          this.drift(velocity.dx, velocity.dy);
+        return;
+      }
+      if (event.button !== 0) return;
       const [x, y] = local(event);
-      const marker = this.markers?.find(point => Math.hypot(x - point.x, y - point.y) <= 10);
+      const marker = this.markerAt(x, y);
+      if (marker?.kind) {
+        this.callbacks.place(marker.point, marker.kind, false);
+        return;
+      }
       const point = marker?.point ?? this.pick(x, y);
       if (point) this.callbacks.select(point);
     });
-    element.addEventListener('pointercancel', event => active.delete(event.pointerId));
-    element.addEventListener('lostpointercapture', event => active.delete(event.pointerId));
+    const release = event => {
+      active.delete(event.pointerId);
+      if (hold?.id === event.pointerId) cancelHold();
+    };
+    element.addEventListener('pointercancel', release);
+    element.addEventListener('lostpointercapture', release);
+    element.addEventListener('blur', () => this.hideCrosshair());
     element.addEventListener('pointerleave', () => this.callbacks.hover(''));
     element.addEventListener('contextmenu', event => event.preventDefault());
     element.addEventListener('wheel', event => {
       if (event.target.closest('button')) return;
       event.preventDefault();
+      cancelHold();
+      cancelAnimationFrame(this.inertia);
       this.zoomBy(Math.exp(clamp(-event.deltaY * .0012, -.35, .35)));
     }, {passive: false});
     element.addEventListener('keydown', event => {
       if (event.target !== element) return;
-      const actions = {ArrowLeft: [30, 0], ArrowRight: [-30, 0], ArrowUp: [0, 30], ArrowDown: [0, -30]};
-      if (actions[event.key]) this.pan(...actions[event.key], event.shiftKey);
+      const actions = {ArrowLeft: [-18, 0], ArrowRight: [18, 0], ArrowUp: [0, -18], ArrowDown: [0, 18]};
+      if (actions[event.key]) {
+        const [dx, dy] = actions[event.key];
+        if (event.shiftKey) this.pan(-dx, -dy, false);
+        else {
+          const [x, y] = this.crosshair ?? [this.width / 2, this.height / 2];
+          this.crosshair = [clamp(x + dx, 12, this.width - 12), clamp(y + dy, 12, this.height - 12)];
+          const crosshair = element.querySelector('#map-crosshair');
+          crosshair.style.left = `${this.crosshair[0]}px`;
+          crosshair.style.top = `${this.crosshair[1]}px`;
+          crosshair.hidden = false;
+        }
+      }
       else if (['+', '='].includes(event.key)) this.zoomBy(1.22);
       else if (event.key === '-') this.zoomBy(1 / 1.22);
       else if (event.key === 'Enter') {
-        const point = this.pick(this.width / 2, this.height / 2);
-        if (point) this.callbacks.select(point);
+        const target = this.crosshair ?? [this.width / 2, this.height / 2];
+        const pin = this.markerAt(...target);
+        const point = pin?.kind ? pin.point : this.pick(...target);
+        if (point) this.callbacks.place(point, pin?.kind, true);
       } else return;
       event.preventDefault();
     });
@@ -281,8 +428,9 @@ export class MarsMap {
   pick(x, y) {
     if (!this.width) return null;
     if (this.mode === 'map') {
-      const lat = this.center.lat - (y - this.height / 2) / this.scale;
-      return Math.abs(lat) <= 90 ? {lat, lon: wrap(this.center.lon + (x - this.width / 2) / this.scale)} : null;
+      const degreesToPixels = Math.min(this.width / 360, this.height / 180) * this.zoom;
+      const lat = this.center.lat - (y - this.height / 2) / degreesToPixels;
+      return Math.abs(lat) <= 90 ? {lat, lon: wrap(this.center.lon + (x - this.width / 2) / degreesToPixels)} : null;
     }
     const direction = ray(this.view, x, y);
     if (this.mode === 'globe') {
@@ -330,8 +478,20 @@ export class MarsMap {
         context.drawImage(image, x, y, (east - west + 2 * dx) * this.scale, (north - south + 2 * dy) * this.scale);
       };
       if (this.contextLayer) drawRaster(this.contextRaster, this.contextLayer);
-      if (this.regionalLayer && this.regionalLayer !== this.contextLayer) drawRaster(this.regionalImage, this.regionalLayer);
-      if (!this.regionalLayer) drawRaster(this.topography, this.grid, this.grid.dx / 2, this.grid.dy / 2);
+      for (const {layer, image, opacity} of this.regionalOverlays) {
+        if (!opacity || (layer === this.contextLayer && opacity === 1)) continue;
+        context.globalAlpha = opacity;
+        drawRaster(image, layer);
+      }
+      if (this.topographyOpacity) {
+        context.globalAlpha = this.topographyOpacity;
+        drawRaster(this.topography, this.grid, this.grid.dx / 2, this.grid.dy / 2);
+      }
+      if (this.hazardRaster) {
+        context.globalAlpha = .75;
+        drawRaster(this.hazardRaster, this.hazardBounds);
+      }
+      context.globalAlpha = 1;
     }
     if (this.zoom < 8) {
       context.strokeStyle = '#c6d8ed36';
@@ -379,15 +539,17 @@ export class MarsMap {
       this.renderer.draw(this.view, true, {
         global:textureBounds(this.grid, {west:-180, east:180, north:90, south:-90}),
         context:this.contextLayer && textureBounds(this.grid, this.contextLayer),
-        regional:this.regionalLayer && this.regionalLayer !== this.contextLayer && textureBounds(this.grid, this.regionalLayer),
-        topography:!this.regionalLayer,
+        regional:this.regionalOverlays.filter(({layer, opacity}) => opacity > 0 && (layer !== this.contextLayer || opacity !== 1))
+          .map(({layer, thermal, opacity}) => ({thermal, opacity, bounds:textureBounds(this.grid, layer)})),
+        topography:this.topographyOpacity,
+        hazard:this.hazardRaster && textureBounds(this.grid, this.hazardBounds),
       });
     } else return;
     this.drawOverlay(context);
   }
 
   drawOverlay(context) {
-    const {landmarks = [], routes = [], active, start, end, selected, waypoints = [], progress} = this.overlay;
+    const {landmarks = [], routes = [], active, start, end, selected, waypoints = [], progress, temporary, rendezvous, hazards = []} = this.overlay;
     const line = (points, color, width, dashed = false) => {
       context.beginPath();
       let before;
@@ -415,6 +577,14 @@ export class MarsMap {
       });
       line([...boundary, corners[0]], '#8aead7aa', 1.5, true);
     }
+    for (const zone of hazards) {
+      const span = zone.radius / (MARS_RADIUS * RAD);
+      const outline = Array.from({length:41}, (_, index) => {
+        const angle = index / 40 * 2 * Math.PI;
+        return {lat:zone.lat + span * Math.cos(angle), lon:wrap(zone.lon + span * Math.sin(angle) / Math.cos(zone.lat * RAD))};
+      });
+      line(outline, '#ff6e76', 2, true);
+    }
     for (const [index, route] of routes.entries()) {
       if (route.id !== active) line(route.points, ROUTE_COLORS[index] + 'aa', 2, true);
     }
@@ -424,13 +594,13 @@ export class MarsMap {
       line(routes[index].points, ROUTE_COLORS[index], 3.5);
     }
     this.markers = [];
-    const pin = (point, label, color, r, clickable = false) => {
+    const pin = (point, label, color, r, clickable = false, kind = null) => {
       if (!point) return;
       const xy = this.location(point);
       if (!xy) return;
       const [x, y] = xy;
       if (x < -12 || x > this.width + 12 || y < -12 || y > this.height + 12) return;
-      if (clickable) this.markers.push({x, y, point});
+      if (clickable) this.markers.push({x, y, point, kind});
       context.beginPath();
       context.arc(x, y, r, 0, Math.PI * 2);
       context.fillStyle = color;
@@ -441,15 +611,21 @@ export class MarsMap {
       if (!label) return;
       context.font = '600 11px system-ui';
       context.lineWidth = 3;
+      if (this.mode === 'globe' && clickable && !kind) context.globalAlpha = clamp(this.zoom * .64, .26, 1);
       context.strokeText(label, x + r + 5, y - 6);
       context.fillStyle = '#eff3f8';
       context.fillText(label, x + r + 5, y - 6);
+      context.globalAlpha = 1;
     };
     for (const landmark of landmarks) pin(landmark, landmark.name, '#ffaf85', 4, true);
-    for (const waypoint of waypoints) pin(waypoint, waypoint.name, '#f1d786', 5, true);
-    pin(start, 'Start', '#8bebd5', 6);
-    pin(end, 'Destination', '#ff9467', 6);
+    for (const waypoint of waypoints) pin(waypoint, waypoint.label, waypoint.selected ? '#f1d786' : '#8796a9', 5, true, 'stop');
+    pin(start, 'A', '#8bebd5', 6, true, 'start');
+    pin(end, 'B', '#ff9467', 6, true, 'end');
+    pin(rendezvous, 'Rendezvous', '#d5a6f8', 5);
+    for (const zone of hazards) pin(zone, 'No-go', '#ff707a', 5, true, 'hazard');
     pin(selected, '', '#e9eff7', 4);
     pin(progress, 'Crew', '#fff', 6);
+    pin(temporary, '', '#ffce9f', 7);
+    if (temporary) this.callbacks.anchor(this.location(temporary));
   }
 }

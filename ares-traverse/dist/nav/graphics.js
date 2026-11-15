@@ -86,7 +86,7 @@ precision mediump float;
 uniform sampler2D image;
 uniform vec3 light;
 uniform float relief;
-uniform float feather;
+uniform float feather, opacity, useAlpha;
 uniform vec4 textureBounds;
 varying vec2 vUv;
 varying vec3 n;
@@ -99,7 +99,7 @@ void main() {
   float illumination = max(0.0,dot(normalize(n),normalize(light)));
   vec2 edge = min(textureUv, vec2(1.0)-textureUv);
   float alpha = feather > 0.0 ? smoothstep(0.0,feather,min(edge.x,edge.y)) : 1.0;
-  gl_FragColor = vec4(surface*(0.54+0.60*illumination),alpha);
+  gl_FragColor = vec4(surface*(0.54+0.60*illumination),alpha * opacity * mix(1.0,texture2D(image,textureUv).a,useAlpha));
 }
 `;
 
@@ -247,8 +247,10 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.regionalTexture = gl.createTexture();
+    this.thermalTexture = gl.createTexture();
+    this.hazardTexture = gl.createTexture();
     this.contextTexture = gl.createTexture();
-    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds']
+    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds','opacity','useAlpha']
       .map(name => [name, gl.getUniformLocation(this.program, name)]));
     this.sphere = this.mesh(sphereMesh());
     gl.enable(gl.DEPTH_TEST);
@@ -277,7 +279,7 @@ export class Renderer {
     this[key] = mesh ? this.mesh(mesh) : null;
   }
 
-  setImage(image, texture = this.texture) {
+  setImage(image, texture = this.texture, rgba = false) {
     const gl = this.gl;
     let textureImage = image;
     const max = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 4096);
@@ -292,7 +294,8 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, textureImage);
+    const format = rgba ? gl.RGBA : gl.RGB;
+    gl.texImage2D(gl.TEXTURE_2D, 0, format, format, gl.UNSIGNED_BYTE, textureImage);
   }
 
   draw(view, terrain, imagery) {
@@ -314,14 +317,17 @@ export class Renderer {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     if (imagery.context) this.drawMesh(this.relief, this.contextTexture, .12, .16, imagery.context);
-    if (imagery.regional) this.drawMesh(this.relief, this.regionalTexture, .08, .12, imagery.regional);
-    if (imagery.topography) this.drawMesh(this.relief, this.texture, 1, .085);
+    for (const overlay of imagery.regional) {
+      this.drawMesh(this.relief, overlay.thermal ? this.thermalTexture : this.regionalTexture, .08, .12, overlay.bounds, overlay.opacity);
+    }
+    if (imagery.topography) this.drawMesh(this.relief, this.texture, 1, .085, undefined, imagery.topography);
+    if (imagery.hazard) this.drawMesh(this.relief, this.hazardTexture, 0, .005, imagery.hazard, .75, true);
     gl.disable(gl.BLEND);
     gl.depthMask(true);
     gl.depthFunc(gl.LESS);
   }
 
-  drawMesh(mesh, texture, relief, feather = 0, bounds = [0, 0, 1, 1]) {
+  drawMesh(mesh, texture, relief, feather = 0, bounds = [0, 0, 1, 1], opacity = 1, useAlpha = false) {
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
@@ -333,6 +339,8 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.uniform1f(this.locations.relief, relief);
     gl.uniform1f(this.locations.feather, feather);
+    gl.uniform1f(this.locations.opacity, opacity);
+    gl.uniform1f(this.locations.useAlpha, Number(useAlpha));
     gl.uniform4fv(this.locations.textureBounds, bounds);
     gl.drawElements(gl.TRIANGLES, mesh.size, gl.UNSIGNED_SHORT, 0);
   }

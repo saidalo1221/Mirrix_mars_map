@@ -12,6 +12,8 @@ export function fieldPosition(route, fraction) {
     lat: before.lat + (after.lat - before.lat) * ratio,
     lon: wrap(before.lon + wrap(after.lon - before.lon) * ratio),
     station,
+    travelMinutes: (before.travelMinutes ?? before.walkMinutes) +
+      ((after.travelMinutes ?? after.walkMinutes) - (before.travelMinutes ?? before.walkMinutes)) * ratio,
     walkMinutes: before.walkMinutes + (after.walkMinutes - before.walkMinutes) * ratio,
   };
 }
@@ -25,9 +27,9 @@ export function fieldStatus(route, settings, fraction, log) {
   const next = upcoming[0];
   const behind = outstanding.length - upcoming.length;
   const distance = Math.max(0, route.length - position.station);
-  const remaining = Math.max(0, route.walkMinutes - position.walkMinutes) +
+  const remaining = Math.max(0, (route.travelMinutes ?? route.walkMinutes) - position.travelMinutes) +
     upcoming.length * settings.stopMinutes;
-  const walked = position.walkMinutes + (route.stops.length - outstanding.length) * settings.stopMinutes;
+  const walked = position.travelMinutes + (route.stops.length - outstanding.length) * settings.stopMinutes;
   const equipment = equipmentLimit(settings);
   const ahead = route.points.find(point => point.station > position.station && point.segmentSlope >= settings.maxSlope * .8);
   return {position, distance, remaining, next, behind, completed: route.stops.length - outstanding.length,

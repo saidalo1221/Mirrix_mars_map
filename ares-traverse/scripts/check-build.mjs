@@ -3,6 +3,7 @@ import {access, readFile, readdir} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createGrid} from '../dist/nav/elevation.js';
+import {JEZERO_MISSION} from '../dist/nav/mission-demo.js';
 import {MAP_LAYERS, LANDMARKS, REGIONAL_CONTEXT, REGIONAL_IMAGERY, THERMAL_IMAGERY} from '../dist/science.js';
 
 const dist = new URL('../dist/', import.meta.url);
@@ -26,7 +27,7 @@ for (const entry of [catalog.global, ...catalog.regions]) {
   }
 }
 assert.ok(MAP_LAYERS.length >= 2);
-for (const asset of [...MAP_LAYERS, ...Object.values(REGIONAL_CONTEXT), ...Object.values(REGIONAL_IMAGERY), ...Object.values(THERMAL_IMAGERY), ...LANDMARKS.map(point => point.photo).filter(Boolean)]) {
+for (const asset of [...MAP_LAYERS, ...Object.values(REGIONAL_CONTEXT), ...Object.values(REGIONAL_IMAGERY), ...Object.values(THERMAL_IMAGERY), ...[...LANDMARKS, ...JEZERO_MISSION.stops].map(point => point.photo).filter(Boolean)]) {
   if (!/^https?:/.test(asset.url)) await access(new URL(asset.url, dist));
 }
 console.log('Static deployment verified in dist/');

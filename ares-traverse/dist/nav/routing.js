@@ -13,6 +13,8 @@ const directions = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1],
 const angle = (rise, run) => Math.abs(Math.atan2(rise, run) * 180 / Math.PI);
 const walkingSeconds = (run, rise, speed) => run / speed * (1 + 4 * Math.max(0, rise / run) + 2 * Math.max(0, -rise / run));
 
+export const loadedSpeed = settings => settings.speed / (1 + (settings.carriedKg ?? 0) / 50);
+
 export function equipmentLimit(settings) {
   return settings.equipmentMinutes > 0 ? Math.max(0, settings.equipmentMinutes - (settings.reserveMinutes ?? 0)) : null;
 }
@@ -67,9 +69,28 @@ function edgeCost(mode, run, rise, degrees, settings) {
   return timeCost + settings.terrainWeight * run * terrainPenalty;
 }
 
-export function findPath(grid, start, end, mode, settings) {
+export function hazardMask(grid, zones = []) {
+  if (!zones.length) return null;
+  const mask = new Uint8Array(grid.values.length);
+  const radius = distance(nodePoint(grid, 0, 0), nodePoint(grid, 1, 1)) / 2;
+  for (const zone of zones) {
+    const {x, y} = gridPosition(grid, zone);
+    const reach = Math.ceil((zone.radius + radius) / Math.min(
+      distance(zone, {lat:zone.lat, lon:zone.lon + grid.dx}),
+      distance(zone, {lat:zone.lat + grid.dy, lon:zone.lon}),
+    ));
+    for (let row = Math.max(0, Math.floor(y - reach)); row <= Math.min(grid.height - 1, Math.ceil(y + reach)); row++) {
+      for (let col = Math.max(0, Math.floor(x - reach)); col <= Math.min(grid.width - 1, Math.ceil(x + reach)); col++) {
+        if (distance(zone, nodePoint(grid, col, row)) <= zone.radius + radius) mask[row * grid.width + col] = 1;
+      }
+    }
+  }
+  return mask;
+}
+
+export function findPath(grid, start, end, mode, settings, blocked = null) {
   const {width, height, values} = grid;
-  if (start < 0 || end < 0) return null;
+  if (start < 0 || end < 0 || blocked?.[start] || blocked?.[end]) return null;
   if (start === end) return [start];
   const costs = new Float64Array(values.length).fill(Infinity);
   const parents = new Int32Array(values.length).fill(-1);
@@ -96,13 +117,13 @@ export function findPath(grid, start, end, mode, settings) {
       const y = row + dy;
       if (x < 0 || x >= width || y < 0 || y >= height) continue;
       const next = y * width + x;
-      if (closed[next] || !Number.isFinite(values[next])) continue;
+      if (closed[next] || blocked?.[next] || !Number.isFinite(values[next])) continue;
       if (dx && dy) {
         const horizontal = values[node + dx];
         const vertical = values[node + dy * width];
         const eastWest = distance(current, nodePoint(grid, x, row));
         const northSouth = distance(current, nodePoint(grid, col, y));
-        if (!Number.isFinite(horizontal) || !Number.isFinite(vertical) ||
+        if (blocked?.[node + dx] || blocked?.[node + dy * width] || !Number.isFinite(horizontal) || !Number.isFinite(vertical) ||
             Math.max(angle(horizontal - values[node], eastWest), angle(vertical - values[node], northSouth),
               angle(values[next] - horizontal, northSouth), angle(values[next] - vertical, eastWest)) > settings.maxSlope) continue;
       }
@@ -124,6 +145,7 @@ export function findPath(grid, start, end, mode, settings) {
 function measure(grid, nodes, stops, stopIndices, settings) {
   const points = nodes.map(node => ({...nodePoint(grid, node % grid.width, Math.floor(node / grid.width)), elevation: grid.values[node]}));
   let length = 0, gain = 0, loss = 0, maxSlope = 0, slopeIntegral = 0, seconds = 0;
+  const levelSpeed = loadedSpeed(settings);
   for (const [index, point] of points.entries()) {
     let segmentSlope = 0;
     if (index) {
@@ -137,18 +159,39 @@ function measure(grid, nodes, stops, stopIndices, settings) {
       loss += Math.max(0, -rise);
       maxSlope = Math.max(maxSlope, slope);
       slopeIntegral += slope * run;
-      seconds += walkingSeconds(run, rise, settings.speed);
+      seconds += walkingSeconds(run, rise, levelSpeed);
     }
     point.station = length;
     point.walkMinutes = seconds / 60;
     point.segmentSlope = segmentSlope;
   }
   const stopMinutes = stops.length * settings.stopMinutes;
-  const minutes = seconds / 60 + stopMinutes;
-  const equipment = equipmentLimit(settings);
   const timedStops = stops.map((stop, index) => ({...stop, station: points[stopIndices[index]].station, routeIndex: stopIndices[index]}));
+  const rover = settings.crewMode === 'rover';
+  const supportTarget = rover ? (timedStops[0]?.station ?? length) * .5 : length * .5;
+  const rendezvousIndex = Math.max(0, points.findLastIndex(point => point.station <= supportTarget));
+  const rendezvous = points[rendezvousIndex];
+  const roverMinutes = rover ? rendezvous.station / settings.roverSpeed / 60 : 0;
+  const walkToRendezvous = rover ? rendezvous.walkMinutes : 0;
+  const walkMinutes = seconds / 60 - walkToRendezvous;
+  const travelMinutes = walkMinutes + roverMinutes;
+  for (const [index, point] of points.entries()) {
+    point.travelMinutes = !rover ? point.walkMinutes : index <= rendezvousIndex ?
+      point.station / settings.roverSpeed / 60 : roverMinutes + point.walkMinutes - walkToRendezvous;
+    if (rover) point.walkMinutes = index <= rendezvousIndex ? 0 : point.walkMinutes - walkToRendezvous;
+  }
+  const support = ['pair','rover'].includes(settings.crewMode) ? {
+    mode:settings.crewMode, rendezvous:{lat:rendezvous.lat, lon:rendezvous.lon, station:rendezvous.station},
+    legs:[
+      {mode:rover ? 'Rover' : 'Paired walk', meters:rendezvous.station, minutes:rendezvous.travelMinutes},
+      {mode:rover ? 'Walk' : 'Paired walk', meters:length - rendezvous.station, minutes:travelMinutes - rendezvous.travelMinutes},
+    ],
+  } : null;
+  const minutes = travelMinutes + stopMinutes;
+  const equipment = equipmentLimit(settings);
   return {points, stops: timedStops, length, gain, loss, maxSlope, maxGrade: 100 * Math.tan(maxSlope * Math.PI / 180),
-    meanSlope: length ? slopeIntegral / length : 0, walkMinutes: seconds / 60, stopMinutes, minutes,
+    meanSlope: length ? slopeIntegral / length : 0, walkMinutes, travelMinutes, stopMinutes, minutes, support, levelSpeed,
+    timeMargin:settings.maxMinutes - minutes, equipmentMargin:equipment === null ? null : equipment - minutes,
     minElevation: Math.min(...points.map(point => point.elevation)),
     maxElevation: Math.max(...points.map(point => point.elevation)),
     withinTime: minutes <= settings.maxMinutes, withinDistance: length <= settings.maxKm * 1000,
@@ -168,11 +211,13 @@ function score(route, objective, settings, base) {
   return relativeDistance + relativeTime + settings.terrainWeight * terrain - .35 * route.stops.length;
 }
 
-export function planMission(grid, {start, end, waypoints, settings}) {
+export function planMission(grid, {start, end, waypoints, settings, hazards = []}) {
   const first = locate(grid, start);
   const last = locate(grid, end);
   if (first < 0 || last < 0) throw new Error('Both endpoints must fall on valid cells inside the regional DEM.');
   if (first === last) throw new Error('Endpoints snap to the same DEM cell. Select points farther apart.');
+  const blocked = hazardMask(grid, hazards);
+  if (blocked?.[first] || blocked?.[last]) throw new Error('A route endpoint is inside a marked no-go area. Move the point or remove the restriction.');
   const selected = waypoints.filter(point => point.selected);
   const required = selected.filter(point => point.required);
   const variants = [required, selected].filter((stops, index) => !index || selected.length !== required.length);
@@ -187,7 +232,7 @@ export function planMission(grid, {start, end, waypoints, settings}) {
       const stopIndices = [];
       for (let index = 1; index < targets.length; index++) {
         const key = [mode === 'science' ? 'shortest' : mode, targets[index - 1], targets[index]].join(',');
-        if (!segments.has(key)) segments.set(key, findPath(grid, targets[index - 1], targets[index], mode, settings));
+        if (!segments.has(key)) segments.set(key, findPath(grid, targets[index - 1], targets[index], mode, settings, blocked));
         const leg = segments.get(key);
         if (!leg) {
           nodes = [];
@@ -203,7 +248,7 @@ export function planMission(grid, {start, end, waypoints, settings}) {
       alternatives.push({mode: mode === 'science' ? 'shortest' : mode, ...measure(grid, nodes, stops, stopIndices, settings)});
     }
   }
-  if (!alternatives.length) throw new Error('No connected route satisfies the slope ceiling and required stops within this DEM.');
+  if (!alternatives.length) throw new Error('No route satisfies the slope ceiling, no-go areas, and required stops within this DEM.');
   const base = {length: Math.min(...alternatives.map(route => route.length)), minutes: Math.min(...alternatives.map(route => route.minutes))};
   alternatives.sort((a, b) => Number(withinBudgets(b)) - Number(withinBudgets(a)) ||
     score(a, settings.objective, settings, base) - score(b, settings.objective, settings, base));

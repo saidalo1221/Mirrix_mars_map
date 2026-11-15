@@ -41,7 +41,8 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
     };
     pin(route.points[0], 'A', 'field-start');
     pin(route.points.at(-1), 'B', 'field-end');
-    for (const [index, point] of route.stops.entries()) pin(route.points[point.routeIndex], index + 1, 'field-stop');
+    if (route.support) pin(route.support.rendezvous, 'R', 'field-rendezvous');
+    for (const [index, point] of route.stops.entries()) pin(route.points[point.routeIndex], point.number ?? index + 1, 'field-stop');
     crew = svg('circle', {r:5,class:'field-crew'});
     map.append(crew);
   }
@@ -53,7 +54,7 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
     tasks = route.stops.map((point, index) => {
       const row = html('article', '');
       row.className = 'field-task';
-      const title = html('h4', `${index + 1}. ${point.name}`);
+      const title = html('h4', `${point.label ?? "Stop " + (index + 1)} · ${point.name}`);
       const objective = html('p', point.description || 'Record a qualitative surface observation.');
       const label = html('label', 'Field notes (optional)');
       const notes = document.createElement('textarea');
@@ -73,6 +74,19 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
         update();
       };
       row.append(title, objective, label, button);
+      if (point.photo) {
+        const image = document.createElement('img');
+        image.src = point.photo.url;
+        image.alt = point.photo.caption;
+        image.loading = 'lazy';
+        const credit = html('p', `Regional reference view · ${point.photo.credit} `);
+        const source = html('a','NASA image ↗');
+        source.href = point.photo.sourceUrl;
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer';
+        credit.append(source);
+        row.append(image, credit);
+      }
       container.append(row);
       return {point, button};
     });
@@ -95,11 +109,11 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
     get('field-time').textContent = minutes(remaining);
     get('field-count').textContent = `${completed} / ${route.stops.length}`;
     get('field-progress').value = Math.round(progress * 1000);
-    get('field-next').textContent = next ? next.name : distance > .1 ? 'Destination' : 'Destination reached';
+    get('field-next').textContent = next ? `${next.label ?? 'Science stop'} · ${next.name}` : distance > .1 ? 'Destination' : 'Destination reached';
     get('field-objective').textContent = next ?
       `${arrived ? 'At waypoint' : km(next.station - position.station) + ' along route'} · ${next.description || 'Record a qualitative surface observation.'}` :
       distance > .1 ? 'Proceed to the planned end of the traverse.' : 'Review the science checklist and export the field report.';
-    get('field-timeline').textContent = `${km(position.station)} traversed · ${minutes(position.walkMinutes)} modeled walking elapsed`;
+    get('field-timeline').textContent = `${km(position.station)} traversed · ${minutes(position.travelMinutes)} modeled travel elapsed`;
     const button = get('field-play');
     button.disabled = !frame && (Boolean(arrived) || distance <= .1);
     button.textContent = frame ? 'Pause simulation' : arrived ? 'Record science task to continue' : 'Simulate next leg';
