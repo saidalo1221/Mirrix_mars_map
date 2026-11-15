@@ -4,7 +4,7 @@ ARES Navigator is a Mars exploration and mission-planning prototype for NASA Spa
 
 [Launch ARES Navigator on GitHub Pages](https://saidalo1221.github.io/Mirrix_mars_map/)
 
-To deploy on Vercel, import the GitHub repository and keep the Root Directory at the repository root. The checked-in configuration serves `ares-traverse/dist` as a static site.
+To deploy on Vercel, use either the repository root or `ares-traverse` as the project's Root Directory. Both have a checked-in configuration that serves the app's `dist` directory. If you set an Output Directory override, use `ares-traverse/dist` from the repository root or `dist` from `ares-traverse`.
 
 ## Run locally
 
