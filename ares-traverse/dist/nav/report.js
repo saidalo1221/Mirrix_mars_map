@@ -17,7 +17,7 @@ export const ASSUMPTIONS = [
 ];
 
 export function makeReport({name, region, start, end, settings, waypoints, routes, active, layer, regionalImagery,
-  thermalImagery, activeRegionalLayer, scienceLayers, hazards = [], missionGoal, recommendation, fieldLogs = new Map(), progress = 0, now = new Date()}) {
+  thermalImagery, activeRegionalLayer, scienceLayers, hazards = [], missionGoal, solarSchedule, recommendation, fieldLogs = new Map(), progress = 0, now = new Date()}) {
   const selected = routes.find(route => route.id === active) ?? routes[0];
   const snapshot = fieldStatus(selected, settings, progress, fieldLogs.get(selected.id) ?? {});
   const asset = source => source ? {name:source.name, url:source.sourceUrl, credit:source.attribution} : null;
@@ -32,7 +32,8 @@ export function makeReport({name, region, start, end, settings, waypoints, route
       interpretation:thermalImagery.interpretation} : null,
     activeRegionalLayer: activeRegionalLayer ?? 'topography',
     equipmentUsableMinutes: equipmentLimit(settings),
-    start, destination: end, settings, waypoints, hazards, missionGoal:missionGoal ?? null, scienceLayers:scienceLayers ?? null, recommendation,
+    start, destination: end, settings, waypoints, hazards, solarSchedule:solarSchedule ?? null,
+    missionGoal:missionGoal ?? null, scienceLayers:scienceLayers ?? null, recommendation,
     recommendedRoute: routes[0].id, selectedRoute: active,
     routes: routes.map(({points, ...metrics}) => ({...metrics, geometry: {type: 'LineString',
       coordinates: points.map(point => [point.lon, point.lat, point.elevation])}, stationsMeters: points.map(point => point.station)})),
@@ -103,6 +104,23 @@ export function printReport(container, report) {
   add('p', `Route ${simulation.route} · ${(simulation.distanceTraversedMeters / 1000).toFixed(2)} km traversed · ${simulation.estimatedMinutesRemaining.toFixed(1)} min estimated remaining`);
   for (const task of simulation.scienceTasks.filter(task => task.route === simulation.route)) {
     add('p', `${task.label ? task.label + " · " : ""}${task.name} · ${task.completedAt ? 'Completed in simulation' : 'Open'}${task.notes ? ' · ' + task.notes : ''}`);
+  }
+  if (report.solarSchedule) {
+    const solar = report.solarSchedule;
+    add('h2','EVA solar timeline (estimate)');
+    add('p', solar.model + ' · Start ' + solar.start.ltst + ' LTST (' + solar.start.utc + ') · Finish ' + solar.end.ltst + ' LTST');
+    add('p', 'Display time ' + solar.shownAt.utc + ' · Mars Sol Date ' + solar.shownAt.marsSolDate.toFixed(5) +
+      ' · Subsolar point ' + coordinates(solar.shownAt.subsolar,2));
+    add('p', 'Minimum Sun elevation ' + solar.minSolarElevation.toFixed(1) + '° · Sunset reserve ' + solar.sunsetReserveMarsMinutes + ' Mars min');
+    for (const leg of solar.legs) add('p', leg.from + ' → ' + leg.to + ' · ' + leg.departure.ltst + '–' + leg.arrival.ltst + ' LTST');
+    for (const stop of solar.stops) {
+      const remaining = stop.daylightRemainingMarsMinutes;
+      add('p', (stop.label ?? stop.name) + ' · ' + stop.arrival.ltst + ' LTST · Sun ' + stop.arrival.solarElevation.toFixed(1) +
+        '° · ' + (remaining === null ? 'No sunset in prediction interval' : Math.round(remaining) + ' Mars min daylight remaining'));
+    }
+    add('p', 'Optional walk back · estimated arrival ' + solar.optionalWalkBack.arrival.ltst + ' LTST');
+    for (const warning of solar.warnings) add('p',warning);
+    add('p', 'NASA GISS Mars24 · https://www.giss.nasa.gov/tools/mars24/help/algorithm.html');
   }
   add('h2', 'Sources and assumptions');
   add('p', `${report.region.source} · ${report.region.resolutionMeters} m · ${report.region.datum}`);

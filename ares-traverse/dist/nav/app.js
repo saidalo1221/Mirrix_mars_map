@@ -1,4 +1,9 @@
 import * as science from '../science.js';
+import {createMarsClock} from './mars-time-panel.js';
+import {formatMarsHours, marsTime, MARS_TIME_SOURCES, parseMarsHours} from './marsTime.js';
+import {elapsedAtStation, makeTraverseSchedule, positionAtElapsed, scheduleReport} from './solar-traverse.js';
+import {renderSolarTimeline, updateSolarCursor} from './solar-timeline.js';
+import {fieldPosition} from './field-model.js';
 import {createField} from './field.js';
 import {JEZERO_MISSION, RADIATION_SOURCES} from './mission-demo.js';
 import {coordinates, normalizePoint, clamp} from './geo.js';
@@ -25,6 +30,7 @@ const state = {catalog: null, global: null, grid: null, region: null, start: nul
 const archiveGrids = new Map();
 let stopSequence = 0;
 let pointMenu = null;
+let schedule = null, scheduleKey = null, scheduledRoute = null, lastProgressDisplay = 0;
 const pointHistory = [];
 const numberedStops = () => state.waypoints.map((point, index) => ({...point, number:index + 1, label:`Stop ${index + 1}`}));
 const settingKeys = ['maxMinutes', 'maxKm', 'speed', 'maxSlope', 'terrainWeight', 'stopMinutes', 'equipmentMinutes', 'reserveMinutes', 'carriedKg', 'roverSpeed'];
@@ -199,7 +205,7 @@ async function selectRegionalScience(type) {
 
 function updateOverlay() {
   const route = state.routes.find(route => route.id === state.active);
-  const position = route && state.progress > 0 ? route.points.find(point => point.station >= route.length * state.progress) : null;
+  const position = route && (state.progress > 0 || clock.state.mode === 'mission') ? fieldPosition(route,state.progress) : null;
   map.setOverlay({landmarks: LANDMARKS, routes: state.routes, active: state.active, start: state.start, end: state.end,
     selected: state.selected, waypoints: numberedStops(), progress: position, temporary:pointMenu?.point, rendezvous:route?.support?.rendezvous, hazards:state.hazards});
 }
@@ -207,6 +213,7 @@ function updateOverlay() {
 function selectPoint(point, focus = false) {
   if (focus) showInspector('location');
   state.selected = point;
+  clock.refresh();
   if (focus) {
     if (map.mode === 'terrain' && !contains(state.grid, point)) changeMode('globe', point);
     map.focus(point, map.mode === 'map' ? contains(state.grid, point) ? regionalZoom() : 3 : undefined);
@@ -673,8 +680,9 @@ function renderRoutes() {
       if (state.active === route.id) return;
       state.active = route.id;
       setPlayback(false);
-      seekTraverse(state.routeProgress.get(route.id) ?? 0);
+      state.progress = state.routeProgress.get(route.id) ?? 0;
       renderRoutes();
+      if (clock.state.mode === 'mission') seekTraverse(state.progress);
       updateOverlay();
       container.querySelector(`[data-route="${route.id}"]`).focus({preventScroll: true});
     };
@@ -686,6 +694,7 @@ function renderRoutes() {
 function drawProfile(route) {
   const container = get('profile');
   get('simulation').hidden = !route;
+  refreshSchedule(route);
   container.classList.toggle('profile-empty', !route);
   container.replaceChildren();
   get('profile-meta').textContent = route ?
@@ -714,20 +723,57 @@ function drawProfile(route) {
   updateProgress();
 }
 
-let playback = 0;
+function refreshSchedule(route = state.routes.find(item=>item.id === state.active)) {
+  const start = parseMarsHours(get('eva-start-time').value);
+  const reserve = get('sunset-reserve').valueAsNumber;
+  const valid = route && state.start && start !== null && get('sunset-reserve').validity.valid && Number.isFinite(reserve);
+  const key = valid ? [marsTime(clock.state.planningUtc,state.start.lon).localSol,start,reserve].join('/') : null;
+  if (route === scheduledRoute && key === scheduleKey) return;
+  scheduledRoute = route;
+  scheduleKey = key;
+  schedule = valid ?
+    makeTraverseSchedule(route,state.start,clock.state.planningUtc,start,reserve,state.settings) : null;
+  renderSolarTimeline(schedule,route,state.progress,hours=>{
+    get('eva-start-time').value=formatMarsHours(hours);
+    refreshSchedule();
+    if (schedule) clock.set(schedule.start);
+  });
+}
+
+function updatePlayButton() {
+  const active = clock.state.playing && clock.state.scope === 'traverse';
+  get('play').textContent = active ? 'Ⅱ' : '▶';
+  get('play').setAttribute('aria-label',active ? 'Pause traverse' : 'Play traverse');
+}
+
+function applyTraverseClock() {
+  updatePlayButton();
+  if (!schedule || clock.state.mode !== 'mission') return;
+  const route = state.routes.find(item=>item.id === state.active);
+  if (!route) return;
+  const position = positionAtElapsed(schedule.frames,clock.state.utc-schedule.start);
+  state.progress = position.station/route.length;
+  state.routeProgress.set(route.id,state.progress);
+  const now = performance.now();
+  if (!clock.state.playing || now-lastProgressDisplay > 125) {
+    lastProgressDisplay = now;
+    updateSolarCursor(schedule,clock.state.utc);
+    updateProgress();
+  }
+  updateOverlay();
+}
+
 function setPlayback(playing) {
-  cancelAnimationFrame(playback);
-  playback = 0;
-  get('play').textContent = playing ? 'Ⅱ' : '▶';
-  get('play').setAttribute('aria-label', playing ? 'Pause traverse' : 'Play traverse');
-  if (!playing) return;
-  const began = performance.now(), initial = state.progress >= 1 ? 0 : state.progress;
-  const frame = now => {
-    seekTraverse(clamp(initial + (now - began) / 12000, 0, 1));
-    if (state.progress < 1) playback = requestAnimationFrame(frame);
-    else setPlayback(false);
-  };
-  playback = requestAnimationFrame(frame);
+  if (!playing) {
+    if (clock.state.scope === 'traverse') clock.stop();
+    updatePlayButton();
+    return;
+  }
+  if (!schedule) return;
+  const utc = clock.state.mode === 'mission' && clock.state.utc >= schedule.start && clock.state.utc < schedule.end ?
+    clock.state.utc : schedule.start;
+  // Preserve the quick preview. The crew and Sun advance from the same UTC clock.
+  clock.playFrom(utc,schedule.end,(schedule.end-schedule.start)/12000,'traverse');
 }
 
 function updateProgress() {
@@ -739,9 +785,14 @@ function updateProgress() {
 function seekTraverse(fraction) {
   state.progress = fraction;
   if (state.active) state.routeProgress.set(state.active, fraction);
-  get('progress').value = Math.round(fraction * 1000);
-  updateProgress();
-  updateOverlay();
+  if (schedule) {
+    const end = schedule.frames.at(-1);
+    const elapsed = fraction >= 1 ? end.offset : elapsedAtStation(schedule.frames,fraction*end.station);
+    clock.set(schedule.start+elapsed);
+  } else {
+    updateProgress();
+    updateOverlay();
+  }
 }
 
 async function selectLayer(id) {
@@ -764,7 +815,7 @@ function report() {
   return makeReport({...state, waypoints:numberedStops(), name: get('mission-name').value.trim() || 'Mars surface traverse', settings: state.settings,
     regionalImagery: REGIONAL_IMAGERY[state.region.id], thermalImagery: THERMAL_IMAGERY[state.region.id],
     activeRegionalLayer: state.regionalScience, scienceLayers:state.regionalScience === 'blend' ? blendOpacities() : null,
-    missionGoal:state.missionGoal, progress: state.progress});
+    solarSchedule:scheduleReport(schedule,clock.state.utc), missionGoal:state.missionGoal, progress: state.progress});
 }
 
 function renderSources() {
@@ -797,6 +848,7 @@ function renderSources() {
   group('Rover images', [...LANDMARKS, ...JEZERO_MISSION.stops].filter(point => point.photo).map(point => ({
     name:point.name,sourceUrl:point.photo.sourceUrl,attribution:point.photo.credit,
   })));
+  group('Mars time and solar geometry', MARS_TIME_SOURCES);
   group('Historical radiation and space weather', RADIATION_SOURCES);
 }
 
@@ -1076,10 +1128,15 @@ document.addEventListener('keydown', event => {
   }
 });
 get('sources-button').onclick = () => get('sources').showModal();
-get('play').onclick = () => setPlayback(!playback);
+get('play').onclick = () => setPlayback(clock.state.scope !== 'traverse');
 get('progress').oninput = event => {
+  if (!schedule) return;
+  clock.set(schedule.rangeStart+(schedule.rangeEnd-schedule.rangeStart)*Number(event.target.value)/1000);
+};
+for (const id of ['eva-start-time','sunset-reserve']) get(id).onchange = () => {
   setPlayback(false);
-  seekTraverse(Number(event.target.value) / 1000);
+  refreshSchedule();
+  if (schedule && clock.state.mode === 'mission') seekTraverse(state.progress);
 };
 
 get('place-hazard').onclick = () => {
@@ -1117,12 +1174,14 @@ for (const key of mixKeys) {
 const field = createField({
   current:() => ({route:state.routes.find(route => route.id === state.active), settings:state.settings,
     progress:state.progress, log:state.fieldLogs.get(state.active) ?? {}, region:state.region,
-    thermal:THERMAL_IMAGERY[state.region?.id], missionObjective:OBJECTIVES[state.settings?.objective]}),
+    thermal:THERMAL_IMAGERY[state.region?.id], missionObjective:OBJECTIVES[state.settings?.objective], solarStops:schedule?.observations}),
   seek:seekTraverse,
   saveTask:(id, change) => {
     const log = state.fieldLogs.get(state.active) ?? {};
     log[id] = {...log[id], ...change};
     state.fieldLogs.set(state.active, log);
+    const stop = change.completedAt && schedule?.observations.find(item=>item.id===id);
+    if (stop) clock.set(Date.parse(stop.departure.utc));
   },
   restart:() => seekTraverse(0),
   exportReport:() => downloadReport(report()),
@@ -1170,6 +1229,12 @@ for (const id of ['location','routes']) {
     get(`${target}-tab`).focus();
   };
 }
+const clock = createMarsClock({
+  location:() => state.selected,
+  onChange:solar => {map.setSolar(solar); applyTraverseClock();},
+  onUserTime:() => refreshSchedule(),
+});
+clock.refresh();
 changeMode('globe');
 renderSources();
 renderInspector();

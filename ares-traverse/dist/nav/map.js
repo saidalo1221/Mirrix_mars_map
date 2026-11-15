@@ -1,3 +1,4 @@
+import {solarVector} from './marsTime.js';
 import {clamp, coordinates, distance, lonLat, RAD, MARS_RADIUS, wrap, xyz} from './geo.js';
 import {contains, nodePoint} from './elevation.js';
 import {camera, contextBounds, displayElevation, dot, intersectRelief, intersectSphere, project, ray, reliefMesh, Renderer, terrainModel, textureBounds} from './graphics.js';
@@ -74,6 +75,7 @@ export class MarsMap {
     this.grid = grid;
     this.hazardRaster = null;
     this.terrain = terrainModel(grid);
+    this.renderer?.setShadowGrid(grid,this.terrain);
     this.setElevationContext(contextGrid);
     const raster = this.topography = document.createElement('canvas');
     raster.width = grid.width;
@@ -101,6 +103,11 @@ export class MarsMap {
       this.mesh = reliefMesh(this.grid, this.terrain, grid, this.terrainBounds);
       this.renderer.setRelief(this.mesh);
     }
+    this.invalidate();
+  }
+
+  setSolar(solar) {
+    this.solar = solar;
     this.invalidate();
   }
 
@@ -511,6 +518,79 @@ export class MarsMap {
     }
   }
 
+  drawSunIcon(context, position, glow) {
+    if (!position) return;
+    const [x,y] = position;
+    if (x < -18 || y < -18 || x > this.width+18 || y > this.height+18) return;
+    if (glow) {
+      const halo = context.createRadialGradient(x,y,2,x,y,17);
+      halo.addColorStop(0,'#ffd786bb');
+      halo.addColorStop(1,'#ffc37300');
+      context.fillStyle = halo;
+      context.fillRect(x-17,y-17,34,34);
+    }
+    context.beginPath();
+    context.arc(x,y,4.2,0,Math.PI*2);
+    context.fillStyle = '#ffe3a1';
+    context.fill();
+    context.strokeStyle = '#85581c';
+    context.lineWidth = 1;
+    context.stroke();
+  }
+
+  drawSolarMap(context) {
+    if (!this.solar) return;
+    const {declination,subsolar} = this.solar;
+    const from = Math.max(0,this.height/2 + (this.center.lat-90)*this.scale);
+    const to = Math.min(this.height,this.height/2 + (this.center.lat+90)*this.scale);
+    const sunX = this.width/2 + wrap(subsolar.lon-this.center.lon)*this.scale;
+    const period = 360*this.scale;
+    const maxCopies = Math.ceil(this.width/period)+1;
+    const count = Math.max(1,Math.ceil((to-from)/2));
+    const rows = Array.from({length:count+1},(_,index) => {
+      const y = from+(to-from)*index/count;
+      return {y,lat:(this.center.lat-(y-this.height/2)/this.scale)*RAD};
+    });
+    const hourAngle = (lat,elevation) =>
+      (Math.sin(elevation*RAD)-Math.sin(lat)*Math.sin(declination*RAD)) /
+      (Math.cos(lat)*Math.cos(declination*RAD));
+    const bands = [{elevation:0,color:'#6b477634'},{elevation:-6,color:'#05092198'}];
+    for (const {elevation,color} of bands) {
+      context.fillStyle = color;
+      const edges = rows.map(({y,lat})=>[y,Math.acos(clamp(hourAngle(lat,elevation),-1,1))/RAD*this.scale]);
+      for (let copy=-maxCopies;copy<=maxCopies;copy++) {
+        const x=sunX+copy*period;
+        if (x>=this.width || x+period<=0) continue;
+        context.beginPath();
+        context.moveTo(x+edges[0][1],edges[0][0]);
+        for (const [y,arc] of edges) context.lineTo(x+arc,y);
+        for (let index=edges.length-1;index>=0;index--) {
+          const [y,arc]=edges[index];
+          context.lineTo(x+period-arc,y);
+        }
+        context.closePath();
+        context.fill();
+      }
+    }
+    context.strokeStyle = '#ffe2a190';
+    context.lineWidth = 1;
+    for (const sign of [-1,1]) for (let copy=-maxCopies;copy<=maxCopies;copy++) {
+      context.beginPath();
+      let connected = false;
+      for (const {y,lat} of rows) {
+        const offset = hourAngle(lat,0);
+        if (Math.abs(offset)>=1) { connected=false; continue; }
+        const x = sunX + sign*Math.acos(offset)/RAD*this.scale + copy*period;
+        if (connected) context.lineTo(x,y);
+        else context.moveTo(x,y);
+        connected = true;
+      }
+      context.stroke();
+    }
+    const sunY = this.height/2-(subsolar.lat-this.center.lat)*this.scale;
+    for (let copy=-maxCopies;copy<=maxCopies;copy++) this.drawSunIcon(context,[sunX+copy*period,sunY],true);
+  }
+
   draw() {
     const width = this.width = this.element.clientWidth, height = this.height = this.element.clientHeight;
     if (!width || !height) return;
@@ -524,11 +604,27 @@ export class MarsMap {
     const context = this.context;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, width, height);
-    if (this.mode === 'map') this.flatMap(context);
+    if (this.mode === 'map') {
+      this.flatMap(context);
+      this.drawSolarMap(context);
+    }
     else if (this.mode === 'globe') {
       const eye = xyz(this.center, 1 + 2.35 / this.zoom);
       this.view = camera(eye, [0, 0, 0], [0, 1, 0], width, height);
-      this.renderer.draw(this.view, false);
+      const light = this.solar && xyz({lat:this.solar.declination,lon:this.solar.subsolar.lon});
+      this.renderer.draw(this.view,false,undefined,light ?? undefined);
+      if (this.solar && light) {
+        const marker = this.location({lat:this.solar.declination,lon:this.solar.subsolar.lon});
+        if (marker) this.drawSunIcon(context,marker,true);
+        else {
+          const horizontal = dot(light,this.view.right), vertical = dot(light,this.view.vertical);
+          const radius = Math.hypot(horizontal,vertical);
+          if (radius > .015) {
+            const reach = Math.min(width,height)*.44/radius;
+            this.drawSunIcon(context,[width/2+horizontal*reach,height/2-vertical*reach],true);
+          }
+        }
+      }
     } else if (this.terrain) {
       const center = contains(this.grid, this.center) ? this.center : this.terrain;
       const target = this.terrain.position(center, displayElevation(this.grid, this.contextGrid, center) ?? this.terrain.base);
@@ -536,6 +632,7 @@ export class MarsMap {
       const eye = [target[0] + d * Math.cos(this.tilt) * Math.sin(this.orbit),
         target[1] + d * Math.sin(this.tilt), target[2] + d * Math.cos(this.tilt) * Math.cos(this.orbit)];
       this.view = camera(eye, target, [0, 1, 0], width, height);
+      const sun = this.solar && solarVector(this.solar,this.terrain);
       this.renderer.draw(this.view, true, {
         global:textureBounds(this.grid, {west:-180, east:180, north:90, south:-90}),
         context:this.contextLayer && textureBounds(this.grid, this.contextLayer),
@@ -543,7 +640,7 @@ export class MarsMap {
           .map(({layer, thermal, opacity}) => ({thermal, opacity, bounds:textureBounds(this.grid, layer)})),
         topography:this.topographyOpacity,
         hazard:this.hazardRaster && textureBounds(this.grid, this.hazardBounds),
-      });
+      }, sun ? [sun.east,sun.up,-sun.north] : undefined);
     } else return;
     this.drawOverlay(context);
   }

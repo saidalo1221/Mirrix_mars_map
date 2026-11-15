@@ -47,7 +47,7 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
     map.append(crew);
   }
 
-  function buildTasks(route, log) {
+  function buildTasks(route, log, solarStops) {
     const container = get('field-tasks');
     container.replaceChildren();
     if (!route.stops.length) container.append(html('p', 'This route has no planned science stops.'));
@@ -73,7 +73,14 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
         get('field-status').textContent = `${point.name} recorded as completed for this simulation.`;
         update();
       };
-      row.append(title, objective, label, button);
+      row.append(title, objective);
+      const solar = solarStops?.find(stop => stop.id === point.id);
+      if (solar) {
+        const remaining = solar.daylightRemainingMarsMinutes;
+        row.append(html('p', solar.arrival.ltst + ' LTST · Sun ' + solar.arrival.solarElevation.toFixed(1) + '° · ' +
+          (remaining === null ? 'No sunset in prediction interval' : Math.round(remaining) + ' Mars min daylight remaining') + ' (estimate)'));
+      }
+      row.append(label, button);
       if (point.photo) {
         const image = document.createElement('img');
         image.src = point.photo.url;
@@ -179,10 +186,10 @@ export function createField({current, seek, saveTask, restart, exportReport}) {
   return {
     update,
     open() {
-      const {route, log, region, settings, missionObjective} = current();
+      const {route, log, region, settings, missionObjective, solarStops} = current();
       if (!route) return;
       drawRoute(route);
-      buildTasks(route, log);
+      buildTasks(route, log, solarStops);
       get('field-context').textContent = `${region.name} · Route ${route.id} · ${missionObjective} · ${settings.speed} m/s assumed level speed`;
       get('field-status').textContent = 'Export field records before editing the plan or reloading.';
       dialog.showModal();

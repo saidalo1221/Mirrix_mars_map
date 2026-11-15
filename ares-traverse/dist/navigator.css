@@ -195,3 +195,37 @@ body[data-view=globe] .surface{background:transparent}
 .waypoint>img,.field-task>img{display:block;max-width:100%;max-height:125px;object-fit:contain;border-radius:5px;margin:5px 0}
 .waypoint>small{color:var(--muted)}
 .field-rendezvous{fill:#d5a6f8}
+.map-panel{position:relative}
+.mars-time{position:absolute;right:13px;top:8px;z-index:4;font-size:11px}
+.mars-time summary{cursor:pointer;list-style:none;margin-left:auto;width:max-content;background:#131c2cee;border:1px solid #65799b65;border-radius:7px;padding:5px 8px;color:var(--cyan);font-weight:700}
+.mars-time summary::before{content:"+ ";color:var(--muted)}
+.mars-time[open] summary::before{content:"− "}
+.mars-time-body{width:min(292px,calc(100vw - 48px));max-height:min(58vh,calc(100dvh - 160px),440px);overflow:auto;overscroll-behavior:contain;margin-top:5px;padding:9px;display:grid;gap:5px;background:#0d111ef5;border:1px solid #65799b65;border-radius:10px;box-shadow:0 8px 30px #0009}
+.mars-time-body input,.mars-time-body select,.mars-time-body button{padding:4px;font-size:11px;min-height:26px}
+.mars-time-body label{font-size:10px}
+.mars-time-pair,.mars-time-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;align-items:end}
+.mars-time-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
+.mars-clocks{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;margin:3px 0}
+.mars-clocks dd{margin:0;font-family:var(--mono);color:var(--cyan)}
+#mars-time-form{display:grid;grid-template-columns:minmax(0,.6fr) minmax(0,1fr) auto;gap:4px;align-items:end}
+#mars-time-error{color:#ffaf9b}
+.mars-time-body input[type=range]{accent-color:var(--cyan)}
+.workspace:fullscreen .mars-time,.workspace.fullscreen-fallback .mars-time{top:50px;right:54px}
+@media(max-width:620px){.mars-time-body{max-height:min(54vh,335px)}}
+#simulation{display:grid;gap:2px}
+.solar-timeline-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:7px}
+.solar-track-wrap{display:grid;position:relative;align-items:center;min-height:24px}
+#solar-band{height:10px;background:#101625;position:absolute;inset:7px 5px auto;border-radius:4px;overflow:hidden;pointer-events:none}
+.solar-phase,.solar-eva,.solar-stop{position:absolute;top:0;height:100%}
+.solar-phase.day{background:#af6e31}.solar-phase.twilight{background:#6f5688}.solar-phase.night{background:#23304e}
+.solar-eva{border-block:2px solid var(--cyan);background:#8be8db48}
+.solar-stop{width:2px;background:#fff0b2}
+#simulation #progress{position:relative;margin:0;appearance:none;min-height:24px;background:transparent;border:0;cursor:ew-resize}
+#progress::-webkit-slider-thumb{appearance:none;height:19px;width:9px;border-radius:3px;background:var(--cyan);border:1px solid #0c1019}
+#progress::-moz-range-thumb{height:18px;width:8px;border-radius:3px;background:var(--cyan);border:1px solid #0c1019}
+.solar-timeline-caption{display:flex;justify-content:space-between;gap:6px;color:var(--muted);font-size:10px}
+.daylight-details{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}
+.daylight-details button{font-size:10px;padding:5px 6px}
+.daylight-details ul,.daylight-details ol{padding-left:16px;margin:5px 0}
+.daylight-details summary{cursor:pointer;font-size:11px;margin-top:6px}
+#eva-warnings{color:#ffb09a}

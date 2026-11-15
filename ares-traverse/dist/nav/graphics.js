@@ -83,7 +83,10 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform sampler2D image;
+uniform sampler2D image, heights;
+uniform vec4 shadowGeometry;
+uniform vec2 shadowTexel;
+uniform float terrainMode;
 uniform vec3 light;
 uniform float relief;
 uniform float feather, opacity, useAlpha;
@@ -91,15 +94,43 @@ uniform vec4 textureBounds;
 varying vec2 vUv;
 varying vec3 n;
 varying float tint;
+float encodedHeight(vec4 sampleValue) {
+  return dot(sampleValue.rg, vec2(65280.0,255.0)) / 65535.0;
+}
+float shadowVisibility() {
+  if (terrainMode == 0.0 || light.y <= 0.0 || light.y > 0.65 ||
+      any(lessThan(vUv,vec2(0.0))) || any(greaterThan(vUv,vec2(1.0)))) return 1.0;
+  vec4 origin = texture2D(heights,mix(shadowTexel,vec2(1.0)-shadowTexel,vUv));
+  if (origin.a < .99) return 1.0;
+  vec2 slope = normalize(vec2(light.x,light.z));
+  float rise = light.y / length(light.xz);
+  float separation = shadowGeometry.z;
+  float base = encodedHeight(origin);
+  // Bounded DEM ray march on exaggerated display geometry, not a safety horizon.
+  for (int i=0;i<12;i++) {
+    vec2 query = vUv + slope*separation/shadowGeometry.xy;
+    if (any(lessThan(query,vec2(0.0))) || any(greaterThan(query,vec2(1.0)))) break;
+    vec4 sampleValue = texture2D(heights,mix(shadowTexel,vec2(1.0)-shadowTexel,query));
+    if (sampleValue.a > .99 && (encodedHeight(sampleValue)-base)*shadowGeometry.w > separation*rise + .8)
+      return mix(.15,1.0,smoothstep(.50,.65,light.y));
+    separation *= 1.45;
+  }
+  return 1.0;
+}
 void main() {
   vec3 low = vec3(0.29,0.14,0.105);
   vec3 high = vec3(0.88,0.64,0.41);
   vec2 textureUv = (vUv-textureBounds.xy)/(textureBounds.zw-textureBounds.xy);
   vec3 surface = mix(texture2D(image,textureUv).rgb, mix(low,high,tint), relief);
-  float illumination = max(0.0,dot(normalize(n),normalize(light)));
+  float incidence = dot(normalize(n),normalize(light));
+  float day = smoothstep(-.10,.09,mix(incidence,light.y,terrainMode));
+  float directLight = max(0.0,incidence) * shadowVisibility();
+  float twilight = smoothstep(-.115,-.028,incidence) * (1.0-smoothstep(-.028,.075,incidence));
+  vec3 lit = surface*(.20+.37*day+.58*directLight);
+  lit += surface*vec3(.18,.09,.04)*twilight*(1.0-terrainMode);
   vec2 edge = min(textureUv, vec2(1.0)-textureUv);
   float alpha = feather > 0.0 ? smoothstep(0.0,feather,min(edge.x,edge.y)) : 1.0;
-  gl_FragColor = vec4(surface*(0.54+0.60*illumination),alpha * opacity * mix(1.0,texture2D(image,textureUv).a,useAlpha));
+  gl_FragColor = vec4(lit,alpha * opacity * mix(1.0,texture2D(image,textureUv).a,useAlpha));
 }
 `;
 
@@ -250,7 +281,14 @@ export class Renderer {
     this.thermalTexture = gl.createTexture();
     this.hazardTexture = gl.createTexture();
     this.contextTexture = gl.createTexture();
-    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds','opacity','useAlpha']
+    this.heightTexture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D,this.heightTexture);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(4));
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.activeTexture(gl.TEXTURE0);
+    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds','opacity','useAlpha','heights','terrainMode','shadowTexel','shadowGeometry']
       .map(name => [name, gl.getUniformLocation(this.program, name)]));
     this.sphere = this.mesh(sphereMesh());
     gl.enable(gl.DEPTH_TEST);
@@ -265,6 +303,29 @@ export class Renderer {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
     return {vertexBuffer, indexBuffer, size: indices.length};
+  }
+
+  setShadowGrid(grid, model) {
+    const {width,height,values} = grid;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    const pixels = context.createImageData(width,height);
+    const span = model.max-model.min || 1;
+    for (const [index,value] of values.entries()) {
+      if (!Number.isFinite(value)) continue;
+      const fixed = Math.round(65535*(value-model.min)/span);
+      pixels.data.set([fixed>>8,fixed&255,0,255],index*4);
+    }
+    context.putImageData(pixels,0,0);
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE1);
+    this.setImage(canvas,this.heightTexture,true);
+    gl.activeTexture(gl.TEXTURE0);
+    this.shadowGeometry = [(grid.east-grid.west)*model.eastFactor,(grid.north-grid.south)*model.northFactor,
+      grid.resolutionMeters*.75,span*model.exaggeration];
+    this.shadowTexel = [.5/width,.5/height];
   }
 
   setRelief(mesh) {
@@ -298,11 +359,14 @@ export class Renderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, format, format, gl.UNSIGNED_BYTE, textureImage);
   }
 
-  draw(view, terrain, imagery) {
+  draw(view, terrain, imagery, light = [-.55,.75,-.38]) {
     const gl = this.gl;
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const light = terrain ? [-.7, .85, -.65] : add(scale(view.forward, -1), add(scale(view.right, -.6), scale(view.vertical, .5)));
+    gl.uniform1i(this.locations.heights,1);
+    gl.uniform1f(this.locations.terrainMode,Number(terrain && Boolean(this.shadowGeometry)));
+    gl.uniform4fv(this.locations.shadowGeometry,this.shadowGeometry ?? [1,1,1,0]);
+    gl.uniform2fv(this.locations.shadowTexel,this.shadowTexel ?? [.5,.5]);
     for (const name of ['eye', 'forward', 'right', 'vertical']) gl.uniform3fv(this.locations[name], view[name]);
     gl.uniform3f(this.locations.light, ...light);
     gl.uniform2f(this.locations.magnification, view.focal * 2 / view.width, view.focal * 2 / view.height);

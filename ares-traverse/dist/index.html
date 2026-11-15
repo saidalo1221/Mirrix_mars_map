@@ -99,6 +99,10 @@
             <label>Terrain weight<input id="terrainWeight" type="number" min="0" max="8" step=".5" value="2"></label>
             <label>Min per stop<input id="stopMinutes" type="number" min="0" max="120" value="10"></label>
           </div>
+          <div class="field-pair">
+            <label>EVA start (LTST)<input id="eva-start-time" type="time" step="1" value="09:00"></label>
+            <label>Sunset reserve (Mars min)<input id="sunset-reserve" type="number" min="0" max="720" value="60"></label>
+          </div>
           <label for="crewMode">Crew and mobility</label>
           <select id="crewMode"><option value="solo">Walking</option><option value="pair">Astronauts in pairs</option><option value="rover">Rover support + walking</option></select>
           <div class="field-pair">
@@ -118,6 +122,39 @@
       </aside>
       <section class="map-column" aria-label="Mars map and route profile">
         <div class="map-panel panel">
+          <details id="mars-time" class="mars-time">
+            <summary>Mars Time</summary>
+            <div class="mars-time-body">
+              <div class="mars-time-pair"><label>Clock mode<select id="mars-time-mode"><option value="live">Live (now)</option><option value="mission">Mission time</option></select></label>
+              <label>Mission sol<select id="mars-time-mission"><option value="auto">Nearest rover</option><option value="perseverance">Perseverance</option><option value="curiosity">Curiosity</option></select></label></div>
+              <dl class="mars-clocks">
+                <dt>Earth UTC</dt><dd><output id="mars-time-utc" aria-label="Earth UTC"></output></dd>
+                <dt>MTC</dt><dd><output id="mars-time-mtc" aria-label="Coordinated Mars Time"></output></dd>
+                <dt>LMST</dt><dd><output id="mars-time-lmst" aria-label="Local Mean Solar Time"></output></dd>
+                <dt>LTST</dt><dd><output id="mars-time-ltst" aria-label="Local True Solar Time"></output></dd>
+                <dt>Mars Sol Date</dt><dd><output id="mars-time-msd" aria-label="Mars Sol Date"></output></dd>
+              </dl>
+              <p id="mars-time-rover-sol"></p><p id="mars-time-season"></p><p id="mars-time-solar"></p>
+              <label>Local true sol<input id="mars-time-sol" type="number" step="1"></label>
+              <label>Time on this sol<input id="mars-time-scrub" type="range" min="0" max="86399" step="1" value="0"></label>
+              <form id="mars-time-form">
+                <label>Input clock<select id="mars-time-input-kind"><option value="earth">Earth UTC</option><option value="mars">Mars LTST</option></select></label>
+                <label>Set time<input id="mars-time-input" type="text" placeholder="2026-11-15T12:00:00Z" spellcheck="false"></label>
+                <button type="submit">Apply</button>
+              </form>
+              <p id="mars-time-error" role="status"></p>
+              <div class="mars-time-actions">
+                <button id="mars-time-now" type="button">Now</button><button id="mars-time-back" type="button">−1 Mars hour</button><button id="mars-time-forward" type="button">+1 Mars hour</button>
+                <button id="mars-time-sunrise" type="button">Sunrise</button><button id="mars-time-noon" type="button">Solar noon</button><button id="mars-time-sunset" type="button">Sunset</button>
+              </div>
+              <p id="mars-time-day" class="muted"></p>
+              <div class="mars-time-pair"><button id="mars-time-play" type="button" aria-label="Play or pause Mars time" aria-pressed="false">Play</button>
+              <label>Playback speed<select id="mars-time-speed"><option value="1">1×</option><option value="60">60×</option><option value="600">600×</option><option value="3600">3600×</option></select></label></div>
+              <p class="muted">Computed with the <a href="https://www.giss.nasa.gov/tools/mars24/" target="_blank" rel="noreferrer">NASA GISS Mars24 algorithm</a>.</p>
+              <p class="muted">Sunrise, sunset and twilight use an estimated geometric horizon. Terrain shadows use the displayed elevation model.</p>
+              <p id="mars-time-accuracy" class="muted"></p>
+            </div>
+          </details>
           <div class="map-header">
             <div class="map-heading"><span class="signal"></span><h2 id="map-heading">Mars globe</h2></div>
             <div id="fullscreen-view-controls"></div>
@@ -150,15 +187,21 @@
             </div>
             <div class="map-readout"><span id="hover-coordinates">DRAG TO ROTATE · SCROLL TO ZOOM</span></div>
           </div>
-          <div class="map-footer"><span id="layer-credit">Loading imagery…</span><span id="map-message" role="status"></span></div>
+          <div class="map-footer"><span id="layer-credit">Loading imagery…</span><span id="sun-coordinate-readout"></span><span id="map-message" role="status"></span></div>
         </div>
         <section class="panel profile-panel" aria-labelledby="profile-title">
           <div class="section-head"><h2 id="profile-title">Elevation profile</h2><span id="profile-meta" class="muted small">Along the selected route</span></div>
           <div id="profile" class="profile-empty">Generate routes to view elevation along the traverse.</div>
           <div id="simulation" hidden>
-            <button id="play" aria-label="Play traverse">▶</button>
-            <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Traverse progress">
-            <output id="progress-value"></output>
+            <div class="solar-timeline-row">
+              <button id="play" aria-label="Play traverse">▶</button>
+              <div class="solar-track-wrap">
+                <div id="solar-band" aria-hidden="true"></div>
+                <input id="progress" type="range" min="0" max="1000" value="0" aria-label="Traverse progress">
+              </div>
+              <output id="progress-value"></output>
+            </div>
+            <div class="solar-timeline-caption"><span>LTST · daylight / twilight / night</span><span id="solar-timeline-time"></span></div>
           </div>
         </section>
       </section>
@@ -188,6 +231,14 @@
           <div class="section-head"><h2>Route comparison</h2><span id="route-count" class="muted small"></span></div>
           <p id="recommendation" class="small muted" role="status">Your ranked route alternatives appear here.</p>
           <div id="routes"></div>
+          <section class="daylight-details" id="daylight-details" hidden>
+            <div class="section-head"><h2>EVA daylight estimate</h2><button type="button" id="best-eva-window">Best window</button></div>
+            <p id="eva-time-summary" class="small"></p>
+            <ul id="eva-warnings" class="small"></ul>
+            <p id="best-eva-result" role="status" class="small"></p>
+            <button type="button" id="use-eva-window" hidden>Use suggested start</button>
+            <details><summary>Leg and stop times</summary><ol class="small" id="eva-legs"></ol><ul class="small" id="eva-stops"></ul></details>
+          </section>
         </section>
       </aside>
     </div>

@@ -28,6 +28,8 @@ Use **Search HiRISE terrain** under **Analysis region** to look up a terrain mod
 
 On systems without WebGL, the 2D map supports selection, elevation, planning, and export.
 
+Open **Mars Time** above the map for live or simulated Mars clocks and lighting. Generate a route to enable the linked solar timeline, stop times, and **Best window**. [Mars time and daylight methodology](docs/mars-time.md)
+
 ## Verify
 
 ```sh
