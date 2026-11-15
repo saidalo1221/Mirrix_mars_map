@@ -1,5 +1,5 @@
 import * as science from '../science.js';
-import {bindMapSize, createMapLoading} from './map-controls.js';
+import {bindMapSize, bindSolarLighting, createMapLoading} from './map-controls.js';
 import {createMarsClock} from './mars-time-panel.js';
 import {formatMarsHours, marsTime, MARS_TIME_SOURCES, parseMarsHours} from './marsTime.js';
 import {elapsedAtStation, makeTraverseSchedule, positionAtElapsed, scheduleReport} from './solar-traverse.js';
@@ -1257,6 +1257,7 @@ const clock = createMarsClock({
   onUserTime:() => refreshSchedule(),
 });
 bindMapSize();
+bindSolarLighting(map);
 clock.refresh();
 changeMode('globe');
 renderSources();

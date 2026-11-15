@@ -111,6 +111,11 @@ export class MarsMap {
     this.invalidate();
   }
 
+  setSolarLighting(enabled) {
+    this.solarLighting = enabled;
+    this.invalidate();
+  }
+
   setOverlay(overlay) {
     this.overlay = overlay;
     this.invalidate();
@@ -519,7 +524,7 @@ export class MarsMap {
   }
 
   drawSolarMap(context) {
-    if (!this.solar) return;
+    if (!this.solar || !this.solarLighting) return;
     const {declination,subsolar} = this.solar;
     const from = Math.max(0,this.height/2 + (this.center.lat-90)*this.scale);
     const to = Math.min(this.height,this.height/2 + (this.center.lat+90)*this.scale);
@@ -591,7 +596,7 @@ export class MarsMap {
       const eye = xyz(this.center, 1 + 2.35 / this.zoom);
       this.view = camera(eye, [0, 0, 0], [0, 1, 0], width, height);
       const light = this.solar && xyz({lat:this.solar.declination,lon:this.solar.subsolar.lon});
-      this.renderer.draw(this.view,false,undefined,light ?? undefined);
+      this.renderer.draw(this.view,false,undefined,light ?? undefined,this.solarLighting);
     } else if (this.terrain) {
       const center = contains(this.grid, this.center) ? this.center : this.terrain;
       const target = this.terrain.position(center, displayElevation(this.grid, this.contextGrid, center) ?? this.terrain.base);
@@ -607,7 +612,7 @@ export class MarsMap {
           .map(({layer, thermal, opacity}) => ({thermal, opacity, bounds:textureBounds(this.grid, layer)})),
         topography:this.topographyOpacity,
         hazard:this.hazardRaster && textureBounds(this.grid, this.hazardBounds),
-      }, sun ? [sun.east,sun.up,-sun.north] : undefined);
+      }, sun ? [sun.east,sun.up,-sun.north] : undefined,this.solarLighting);
     } else return;
     this.drawOverlay(context);
   }

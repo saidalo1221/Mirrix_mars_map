@@ -135,6 +135,11 @@
                 <dt>Mars Sol Date</dt><dd><output id="mars-time-msd" aria-label="Mars Sol Date"></output></dd>
               </dl>
               <p id="mars-time-rover-sol"></p><p id="mars-time-season"></p><p id="mars-time-solar"></p>
+              <div class="mars-light-settings">
+                <span id="mars-light-label">Light settings</span>
+                <button id="solar-lighting" type="button" aria-label="Solar lighting" aria-pressed="true" aria-describedby="solar-lighting-help">Solar lighting on</button>
+                <p id="solar-lighting-help" class="muted">Turn off the Sun's shadows and night shading for a brighter map.</p>
+              </div>
               <label>Local true sol<input id="mars-time-sol" type="number" step="1"></label>
               <label>Time on this sol<input id="mars-time-scrub" type="range" min="0" max="86399" step="1" value="0"></label>
               <form id="mars-time-form">

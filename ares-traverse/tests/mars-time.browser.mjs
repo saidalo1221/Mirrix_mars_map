@@ -68,6 +68,19 @@ try {
     const noon=await screenshot(type,'day');
     const midnight=await screenshot(type,'night');
     assert.ok(noon>midnight*1.25,type+' day '+noon.toFixed(1)+' / night '+midnight.toFixed(1));
+    const nightClock=await page.locator('#mars-time-utc').textContent();
+    await toggle();
+    const lighting=page.getByRole('button',{name:'Solar lighting',exact:true});
+    await lighting.click();
+    assert.equal(await lighting.getAttribute('aria-pressed'),'false');
+    assert.equal(await page.locator('#mars-time-utc').textContent(),nightClock);
+    await toggle();
+    const unshaded=await screenshot(type,'night');
+    assert.ok(unshaded>midnight*1.35,type+' map brightens with solar lighting off');
+    await toggle();
+    await lighting.click();
+    assert.equal(await lighting.getAttribute('aria-pressed'),'true');
+    await toggle();
     if (type==='terrain') {
       const low=await screenshot(type,'low');
       assert.ok(midnight<low && low<noon,'Low-sun illumination lies between midnight and noon');

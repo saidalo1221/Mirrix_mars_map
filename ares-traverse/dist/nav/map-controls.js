@@ -1,5 +1,23 @@
 const get = id => document.getElementById(id);
 
+export function bindSolarLighting(map) {
+  const button = get('solar-lighting');
+  const key = 'ares-solar-lighting';
+  let enabled = true;
+  try { enabled = localStorage.getItem(key) !== 'off'; } catch {}
+  function apply() {
+    button.setAttribute('aria-pressed',String(enabled));
+    button.textContent = enabled ? 'Solar lighting on' : 'Solar lighting off';
+    map.setSolarLighting(enabled);
+  }
+  button.onclick = () => {
+    enabled = !enabled;
+    apply();
+    try { localStorage.setItem(key,enabled ? 'on' : 'off'); } catch {}
+  };
+  apply();
+}
+
 export function createMapLoading() {
   const overlay = get('map-loading');
   const jobs = new Map();

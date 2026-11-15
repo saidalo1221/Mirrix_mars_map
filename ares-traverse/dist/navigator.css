@@ -273,3 +273,5 @@ body[data-view=globe] .surface{background:transparent}
 .loading-star{width:18px;height:18px;background:#ffdfa0;box-shadow:0 0 25px 8px #ffc36975}
 @keyframes mars-loader-orbit{to{offset-distance:calc(var(--start) + 100%)}}
 @media(prefers-reduced-motion:reduce){.loading-orbit i{animation:none}}
+.mars-light-settings{display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 8px;border-block:1px solid #65799b4d;padding:6px 0}
+.mars-light-settings p{grid-column:1/-1}

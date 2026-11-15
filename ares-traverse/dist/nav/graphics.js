@@ -87,6 +87,7 @@ uniform sampler2D image, heights;
 uniform vec4 shadowGeometry;
 uniform vec2 shadowTexel;
 uniform float terrainMode;
+uniform float solarLighting;
 uniform vec3 light;
 uniform float relief;
 uniform float feather, opacity, useAlpha;
@@ -122,12 +123,18 @@ void main() {
   vec3 high = vec3(0.88,0.64,0.41);
   vec2 textureUv = (vUv-textureBounds.xy)/(textureBounds.zw-textureBounds.xy);
   vec3 surface = mix(texture2D(image,textureUv).rgb, mix(low,high,tint), relief);
-  float incidence = dot(normalize(n),normalize(light));
-  float day = smoothstep(-.10,.09,mix(incidence,light.y,terrainMode));
-  float directLight = max(0.0,incidence) * shadowVisibility();
-  float twilight = smoothstep(-.115,-.028,incidence) * (1.0-smoothstep(-.028,.075,incidence));
-  vec3 lit = surface*(.20+.37*day+.58*directLight);
-  lit += surface*vec3(.18,.09,.04)*twilight*(1.0-terrainMode);
+  vec3 normal = normalize(n);
+  vec3 lit = surface;
+  if (solarLighting > .5) {
+    float incidence = dot(normal,normalize(light));
+    float day = smoothstep(-.10,.09,mix(incidence,light.y,terrainMode));
+    float directLight = max(0.0,incidence) * shadowVisibility();
+    float twilight = smoothstep(-.115,-.028,incidence) * (1.0-smoothstep(-.028,.075,incidence));
+    lit = surface*(.20+.37*day+.58*directLight);
+    lit += surface*vec3(.18,.09,.04)*twilight*(1.0-terrainMode);
+  } else if (terrainMode > .5) {
+    lit *= .78+.26*max(0.0,dot(normal,normalize(vec3(-.43,.85,-.29))));
+  }
   vec2 edge = min(textureUv, vec2(1.0)-textureUv);
   float alpha = feather > 0.0 ? smoothstep(0.0,feather,min(edge.x,edge.y)) : 1.0;
   gl_FragColor = vec4(lit,alpha * opacity * mix(1.0,texture2D(image,textureUv).a,useAlpha));
@@ -288,7 +295,7 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
     gl.activeTexture(gl.TEXTURE0);
-    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds','opacity','useAlpha','heights','terrainMode','shadowTexel','shadowGeometry']
+    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds','opacity','useAlpha','heights','terrainMode','shadowTexel','shadowGeometry','solarLighting']
       .map(name => [name, gl.getUniformLocation(this.program, name)]));
     this.sphere = this.mesh(sphereMesh());
     gl.enable(gl.DEPTH_TEST);
@@ -359,12 +366,13 @@ export class Renderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, format, format, gl.UNSIGNED_BYTE, textureImage);
   }
 
-  draw(view, terrain, imagery, light = [-.55,.75,-.38]) {
+  draw(view, terrain, imagery, light = [-.55,.75,-.38], solarLighting = true) {
     const gl = this.gl;
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.uniform1i(this.locations.heights,1);
     gl.uniform1f(this.locations.terrainMode,Number(terrain && Boolean(this.shadowGeometry)));
+    gl.uniform1f(this.locations.solarLighting,Number(solarLighting));
     gl.uniform4fv(this.locations.shadowGeometry,this.shadowGeometry ?? [1,1,1,0]);
     gl.uniform2fv(this.locations.shadowTexel,this.shadowTexel ?? [.5,.5]);
     for (const name of ['eye', 'forward', 'right', 'vertical']) gl.uniform3fv(this.locations[name], view[name]);
