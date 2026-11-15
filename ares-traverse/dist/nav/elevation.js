@@ -56,6 +56,11 @@ export function nodePoint(grid, col, row) {
   return {lat: grid.north - row * grid.dy, lon: wrap(grid.west + col * grid.dx)};
 }
 
+export function loadContextGrid(entry) {
+  return loadGrid({url:entry.contextDem, source:'NASA MGS MOLA / USGS', resolutionMeters:463,
+    datum:'Mars areoid (MOLA)'});
+}
+
 export function sample(grid, point) {
   if (!contains(grid, point)) return null;
   const position = gridPosition(grid, point);

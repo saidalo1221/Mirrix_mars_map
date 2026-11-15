@@ -1,6 +1,6 @@
 import * as science from '../science.js';
 import {coordinates, normalizePoint, clamp} from './geo.js';
-import {contains, getTerrainCatalog, gridPosition, loadGrid, sample} from './elevation.js';
+import {contains, getTerrainCatalog, gridPosition, loadContextGrid, loadGrid, sample} from './elevation.js';
 import {explain, OBJECTIVES, planMission, withinBudgets} from './routing.js';
 import {MarsMap, ROUTE_COLORS} from './map.js';
 import {downloadReport, makeReport, printReport} from './report.js';
@@ -68,6 +68,11 @@ function regionalZoom() {
   return 100 / Math.max(state.grid.east - state.grid.west, state.grid.north - state.grid.south);
 }
 
+function terrainZoom() {
+  const {min, max, exaggeration, meters} = map.terrain;
+  return clamp(1.5 - .48 * (max - min) * exaggeration / meters, 1.03, 1.45);
+}
+
 function changeMode(requested, focus = state.selected) {
   if (requested === 'terrain' && !state.grid) {
     mapStatus('Select an analysis region to open DEM relief.', true);
@@ -77,7 +82,7 @@ function changeMode(requested, focus = state.selected) {
   map.setMode(requested);
   if (map.mode !== oldMode) {
     const point = map.mode === 'terrain' && !contains(state.grid, focus) ? map.terrain : focus;
-    const zoom = map.mode === 'map' && state.grid && contains(state.grid, point) ? regionalZoom() : map.mode === 'terrain' ? 1.4 : 1;
+    const zoom = map.mode === 'map' && state.grid && contains(state.grid, point) ? regionalZoom() : map.mode === 'terrain' ? terrainZoom() : 1;
     map.center = {lat: point.lat, lon: point.lon};
     map.zoom = zoom;
   }
@@ -102,7 +107,9 @@ function renderLayerCredit() {
   const context = map.contextLayer;
   get('layer-credit').textContent = map.mode === 'terrain' ?
     `${state.grid?.source ?? ''} · ${regional?.attribution ?? 'Elevation tint'}` +
-    (context && context !== regional ? ` · ${context.name} surroundings` : '') + ' · Routing inside dashed boundary' :
+    (context && context !== regional ? ` · ${context.name}` : '') +
+    (map.contextGrid ? ` · MOLA surroundings (${map.contextGrid.wrapLongitude ? '14.8 km' : '463 m'} source)` : ' · Surrounding elevation unavailable') +
+    ' · Routing inside dashed boundary' :
     layer ? layer.attribution + (map.mode === 'map' && state.grid ? ` · ${regional?.attribution ?? 'DEM elevation tint'} at regional zoom` +
       (context && context !== regional ? ` · ${context.name} surroundings` : '') : '') : 'Imagery loading…';
   get('layer').title = map.mode === 'terrain' ? 'Global imagery supplies context beyond the local mosaic.' : '';
@@ -173,7 +180,8 @@ function renderInspector() {
   const point = state.selected;
   const regional = contains(state.grid, point) ? state.grid : null;
   const regionalValue = sample(regional, point);
-  const grid = regionalValue === null ? state.global : regional;
+  const context = contains(map.contextGrid, point) && state.grid ? map.contextGrid : null;
+  const grid = regionalValue === null ? context ?? state.global : regional;
   const value = regionalValue ?? sample(grid, point);
   get('location-title').textContent = point.name ?? 'Selected coordinates';
   get('location-coordinates').textContent = coordinates(point);
@@ -186,17 +194,23 @@ function renderInspector() {
   for (const key of ['start', 'end']) {
     get(`${key}-value`).textContent = state[key] ? coordinates(state[key]) : 'Choose a surface point';
   }
+  const nearbyTerrain = state.catalog?.regions.find(entry => entry.id === point.id) ??
+    (regional ? state.region : null);
+  const terrainAction = get('open-local-terrain');
+  terrainAction.hidden = !nearbyTerrain;
+  terrainAction.title = nearbyTerrain?.name ?? '';
+  terrainAction.onclick = nearbyTerrain ? async () => {
+    if (nearbyTerrain !== state.region || !state.grid) await openRegion(nearbyTerrain);
+    if (state.region === nearbyTerrain && state.grid) {
+      const focus = contains(state.grid, state.selected) ? state.selected : map.terrain;
+      changeMode(map.renderer ? 'terrain' : 'map', focus);
+      map.focus(focus, map.renderer ? terrainZoom() : regionalZoom());
+    }
+  } : null;
   const panel = get('science-info');
   panel.replaceChildren();
   if (!point.description && !point.science && !point.mission) return;
   const block = element('div', undefined, 'science-copy');
-  const nearbyTerrain = state.catalog?.regions.find(entry => entry.id === point.id);
-  if (nearbyTerrain && nearbyTerrain !== state.region) {
-    const terrainButton = element('button', 'Open local terrain');
-    terrainButton.type = 'button';
-    terrainButton.onclick = () => openRegion(nearbyTerrain);
-    block.append(terrainButton,element('p',nearbyTerrain.name,'small muted'));
-  }
   for (const text of [point.description, point.mission, point.science]) if (text) block.append(element('p', text));
   if (point.photo?.url) {
     const img = element('img');
@@ -389,7 +403,7 @@ async function setDestination(destination) {
     invalidateMission();
     selectPoint(destination);
     changeMode(map.renderer ? 'terrain' : 'map', destination);
-    map.focus(destination, map.mode === 'map' ? regionalZoom() : 1.55);
+    map.focus(destination, map.mode === 'map' ? regionalZoom() : terrainZoom());
     if (!start) {
       mapStatus('Set a start point in this analysis area first.', true);
       return;
@@ -408,6 +422,7 @@ async function selectRegion(entry) {
     scienceRequest++;
     state.grid = null;
     map.grid = null;
+    map.contextGrid = null;
     state.regionalScience = 'topography';
     map.setRegionalImagery(null);
     map.setContextImagery(null);
@@ -425,7 +440,15 @@ async function selectRegion(entry) {
     const grid = archiveGrids.get(entry.id) ?? await loadGrid(entry);
     if (request !== regionRequest) return;
     state.grid = grid;
-    map.setGrid(grid);
+    map.setGrid(grid, state.global);
+    if (entry.contextDem) loadContextGrid(entry).then(contextGrid => {
+      if (request !== regionRequest) return;
+      map.setElevationContext(contextGrid);
+      renderInspector();
+      renderLayerCredit();
+    }).catch(() => {
+      if (request === regionRequest) renderLayerCredit();
+    });
     map.setContextImagery(REGIONAL_CONTEXT[entry.id]).then(() => {
       if (request === regionRequest) renderLayerCredit();
     }).catch(() => {
@@ -437,7 +460,7 @@ async function selectRegion(entry) {
       const center = {lat:map.terrain.lat, lon:map.terrain.lon, name:entry.name};
       selectPoint(center);
       changeMode(map.mode === 'map' || !map.renderer ? 'map' : 'terrain', center);
-      map.focus(center, map.mode === 'map' ? regionalZoom() : 1.55);
+      map.focus(center, map.mode === 'map' ? regionalZoom() : terrainZoom());
       if (REGIONAL_IMAGERY[entry.id]) selectRegionalScience('optical');
     }
     if (changed) {
@@ -669,6 +692,11 @@ function renderSources() {
     panel.append(element('h3',title),list);
   };
   group('Elevation and routing', [state.catalog?.global, ...(state.catalog?.regions ?? [])].filter(Boolean));
+  group('Surrounding relief', [{
+    name:'NASA Mars Global Surveyor MOLA · USGS 463 m model',
+    sourceUrl:'https://astrogeology.usgs.gov/search/map/mars_mgs_mola_dem_463m',
+    attribution:'128 pixels per degree. Bounded numerical crops are blended into regional views for display.',
+  }]);
   group('Live terrain catalogs', Object.entries(ARCHIVE_SOURCES).map(([id,source]) => ({
     name:`USGS ${source.label} terrain archive`,sourceUrl:source.url,
     productUrl:STAC_COLLECTIONS + id,attribution:source.label === 'HiRISE' ? 'Place, product ID, and destination search' : 'Destination lookup using areoid-adjusted DEMs',
@@ -691,7 +719,7 @@ for (const point of LANDMARKS) {
 }
 function openRegion(entry) {
   get('region').value = entry.id;
-  selectRegion(entry);
+  return selectRegion(entry);
 }
 get('places').onchange = event => {
   const select = event.target;
@@ -829,7 +857,15 @@ getTerrainCatalog().then(catalog => {
   }
   get('region-detail').textContent = 'Global MOLA lookup · Regional DEM required for routing.';
   renderSources();
-  if (catalog.global) return loadGrid(catalog.global).then(grid => { state.global = grid; renderInspector(); });
+  renderInspector();
+  if (catalog.global) return loadGrid(catalog.global).then(grid => {
+    state.global = grid;
+    if (state.grid && !map.contextGrid) {
+      map.setElevationContext(grid);
+      renderLayerCredit();
+    }
+    renderInspector();
+  });
 }).catch(error => {
   state.globalError = error.message;
   if (!state.catalog) get('region-detail').textContent = 'Elevation catalog unavailable.';

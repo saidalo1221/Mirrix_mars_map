@@ -19,6 +19,11 @@ assert.ok(catalog.global && catalog.regions.some(region => region.demo));
 for (const entry of [catalog.global, ...catalog.regions]) {
   const grid = createGrid(entry, await readJSON(`assets/terrain/${entry.url}`));
   assert.ok(grid.values.some(Number.isFinite), `Empty terrain file: ${entry.url}`);
+  if (entry.contextDem) {
+    const context = createGrid({}, await readJSON(`assets/terrain/${entry.contextDem}`));
+    assert.ok(context.values.every(Number.isFinite), `Missing context elevations: ${entry.contextDem}`);
+    assert.ok(context.west < grid.west && context.east > grid.east && context.south < grid.south && context.north > grid.north);
+  }
 }
 assert.ok(MAP_LAYERS.length >= 2);
 for (const asset of [...MAP_LAYERS, ...Object.values(REGIONAL_CONTEXT), ...Object.values(REGIONAL_IMAGERY), ...Object.values(THERMAL_IMAGERY), ...LANDMARKS.map(point => point.photo).filter(Boolean)]) {

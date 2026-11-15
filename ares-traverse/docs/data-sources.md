@@ -4,6 +4,7 @@
 
 | Product | Role | Source |
 | --- | --- | --- |
+| USGS MGS MOLA DEM, 128 pixels per degree | Numerical 3D surroundings for seven bundled regions, ~463 m at the equator | [USGS product and GeoTIFF](https://astrogeology.usgs.gov/search/map/mars_mgs_mola_dem_463m) |
 | MGS MOLA MEGDR 4 pixels per degree | Global elevation lookup | [NASA PDS product label](https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/megt90n000cb.lbl) |
 | Mars 2020 Science Investigation CTX stereo DEM, 20 m | Jezero regional relief and routing | [USGS Astrogeology product](https://astrogeology.usgs.gov/search/map/mars_2020_science_investigation_ctx_dem_mosaic), [GeoTIFF](https://planetarymaps.usgs.gov/mosaic/mars2020_trn/CTX/ScienceInvestigationMaps_JPL/M20_JezeroCrater_CTXDEM_20m.tif) |
 | MRO HiRISE DTM DTEEC_040770_1755_039280_1755_A01 | Gale lower Mount Sharp, Pahrump Hills relief and routing | [HiRISE DTM and metadata](https://www.uahirise.org/dtm/dtm.php?ID=ESP_040770_1755) |

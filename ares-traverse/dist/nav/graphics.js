@@ -1,5 +1,5 @@
-import {clamp, MARS_RADIUS, RAD, xyz} from './geo.js';
-import {nodePoint} from './elevation.js';
+import {clamp, MARS_RADIUS, RAD, wrap, xyz} from './geo.js';
+import {sample} from './elevation.js';
 
 export const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export const add = (a, b) => a.map((value, index) => value + b[index]);
@@ -78,22 +78,26 @@ void main() {
 `;
 
 const fragment = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 uniform sampler2D image;
 uniform vec3 light;
 uniform float relief;
 uniform float feather;
-uniform vec4 featherBounds;
+uniform vec4 textureBounds;
 varying vec2 vUv;
 varying vec3 n;
 varying float tint;
 void main() {
   vec3 low = vec3(0.29,0.14,0.105);
   vec3 high = vec3(0.88,0.64,0.41);
-  vec3 surface = mix(texture2D(image,vUv).rgb, mix(low,high,tint), relief);
+  vec2 textureUv = (vUv-textureBounds.xy)/(textureBounds.zw-textureBounds.xy);
+  vec3 surface = mix(texture2D(image,textureUv).rgb, mix(low,high,tint), relief);
   float illumination = max(0.0,dot(normalize(n),normalize(light)));
-  vec2 normalizedUv = (vUv-featherBounds.xy)/(featherBounds.zw-featherBounds.xy);
-  vec2 edge = min(normalizedUv, vec2(1.0)-normalizedUv);
+  vec2 edge = min(textureUv, vec2(1.0)-textureUv);
   float alpha = feather > 0.0 ? smoothstep(0.0,feather,min(edge.x,edge.y)) : 1.0;
   gl_FragColor = vec4(surface*(0.54+0.60*illumination),alpha);
 }
@@ -114,7 +118,7 @@ export function terrainModel(grid) {
   const base = (min + max) / 2;
   const exaggeration = 3;
   const position = (point, elevation = base) => [
-    (point.lon - lon) * eastFactor / meters,
+    wrap(point.lon - lon) * eastFactor / meters,
     (elevation - base) * exaggeration / meters,
     (lat - point.lat) * northFactor / meters,
   ];
@@ -140,55 +144,83 @@ export function sphereMesh() {
   return {vertices, indices};
 }
 
-export const RELIEF_CELLS = 240;
+export const RELIEF_CELLS = 152;
 
-export function contextPlane(model, bounds, global = false) {
-  const vertices = [];
-  const {west, east, north, south} = bounds;
-  for (const [lon, lat, u, v] of [[west, north, 0, 0], [east, north, 1, 0], [west, south, 0, 1], [east, south, 1, 1]]) {
-    vertices.push(...model.position({lon, lat}, model.min - 1), global ? (lon + 180) / 360 : u, global ? (90 - lat) / 180 : v, 0, 1, 0, 0);
-  }
-  return {vertices, indices:[0,1,2,1,3,2]};
+export function contextBounds(grid) {
+  const margin = Math.max(.31, 6 * Math.max(grid.east - grid.west, grid.north - grid.south));
+  return {west:grid.west - margin, east:grid.east + margin,
+    north:Math.min(90, grid.north + margin), south:Math.max(-90, grid.south - margin)};
 }
 
-export function reliefMesh(grid, model, bounds = {west:-180,east:180,north:90,south:-90}) {
-  const vertices = [], indices = [], valid = [];
-  const nx = Math.min(RELIEF_CELLS, grid.width - 1), ny = Math.min(RELIEF_CELLS, grid.height - 1);
-  const value = (x, y) => grid.values[y * grid.width + x];
-  for (let y = 0; y <= ny; y++) {
-    for (let x = 0; x <= nx; x++) {
-      const col = Math.round(x * (grid.width - 1) / nx);
-      const row = Math.round(y * (grid.height - 1) / ny);
-      const height = value(col, row);
-      const point = nodePoint(grid, col, row);
-      const position = model.position(point, Number.isFinite(height) ? height : model.base);
-      const neighbor = (col, row) => {
-        const sample = value(col, row);
-        return model.position(nodePoint(grid, col, row), Number.isFinite(sample) ? sample : height);
-      };
-      let normal = [0, 1, 0];
-      if (Number.isFinite(height)) {
-        const dx = add(neighbor(Math.min(col + 1, grid.width - 1), row), scale(neighbor(Math.max(0, col - 1), row), -1));
-        const dz = add(neighbor(col, Math.min(row + 1, grid.height - 1)), scale(neighbor(col, Math.max(0, row - 1)), -1));
-        normal = unit(cross(dz, dx));
-      }
-      vertices.push(...position, (point.lon - bounds.west) / (bounds.east - bounds.west),
-        (bounds.north - point.lat) / (bounds.north - bounds.south), ...normal,
-        clamp((height - model.min) / (model.max - model.min || 1), 0, 1) || 0);
-      valid.push(Number.isFinite(height));
+export function displayElevation(grid, context, point) {
+  const detail = sample(grid, point);
+  if (detail != null) return detail;
+  const background = sample(context, point);
+  if (background == null || !context) return background;
+  const lon = grid.west + wrap(point.lon - grid.west);
+  const edge = {lat:clamp(point.lat, grid.south, grid.north), lon:clamp(lon, grid.west, grid.east)};
+  const span = Math.max(grid.east - grid.west, grid.north - grid.south);
+  const transition = Math.min(4 * Math.max(context.dx, context.dy), Math.max(.024, 1.4 * span));
+  const fraction = clamp(Math.hypot(edge.lon - lon, edge.lat - point.lat) / transition, 0, 1);
+  if (fraction >= 1) return background;
+  const localEdge = sample(grid, edge), contextEdge = sample(context, edge);
+  if (localEdge == null || contextEdge == null) return background;
+  // Feather the measured boundary residual into the coarse mesh for display only.
+  const blend = 1 - fraction * fraction * (3 - 2 * fraction);
+  return background + (localEdge - contextEdge) * blend;
+}
+
+function meshAxis(first, last, posts, before, after, contextStep) {
+  const cells = Math.min(posts - 1, RELIEF_CELLS);
+  const detail = Array.from({length:cells + 1}, (_, index) =>
+    first + (last - first) * Math.round(index * (posts - 1) / cells) / (posts - 1));
+  if (!contextStep) return detail;
+  const count = span => span > 0 ? clamp(Math.ceil(span / contextStep), 8, 48) : 0;
+  const leading = count(Math.abs(first - before));
+  const trailing = count(Math.abs(after - last));
+  return [
+    ...Array.from({length:leading}, (_, index) => before + (first - before) * index / leading),
+    ...detail,
+    ...Array.from({length:trailing}, (_, index) => last + (after - last) * (index + 1) / trailing),
+  ];
+}
+
+export function reliefMesh(grid, model, context = null, bounds = contextBounds(grid)) {
+  const vertices = [], indices = [];
+  const columns = meshAxis(grid.west, grid.east, grid.width, bounds.west, bounds.east, context?.dx);
+  const rows = meshAxis(grid.north, grid.south, grid.height, bounds.north, bounds.south, context?.dy);
+  const width = columns.length, height = rows.length;
+  const elevations = rows.flatMap(lat => columns.map(lon => displayElevation(grid, context, {lat, lon})));
+  const position = (x, y, fallback) =>
+    model.position({lat:rows[y], lon:columns[x]}, elevations[y * width + x] ?? fallback);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const elevation = elevations[y * width + x];
+      const dx = add(position(Math.min(x + 1, width - 1), y, elevation), scale(position(Math.max(x - 1, 0), y, elevation), -1));
+      const dz = add(position(x, Math.min(y + 1, height - 1), elevation), scale(position(x, Math.max(y - 1, 0), elevation), -1));
+      const normal = elevation == null ? [0, 1, 0] : unit(cross(dz, dx));
+      vertices.push(...position(x, y, model.base),
+        (columns[x] - grid.west) / (grid.east - grid.west),
+        (grid.north - rows[y]) / (grid.north - grid.south), ...normal,
+        clamp((elevation - model.min) / (model.max - model.min || 1), 0, 1));
     }
   }
-  for (let y = 0; y < ny; y++) {
-    for (let x = 0; x < nx; x++) {
-      const i = y * (nx + 1) + x;
-      const a = [i, i + 1, i + nx + 1];
-      const b = [i + 1, i + nx + 2, i + nx + 1];
-      if (a.every(index => valid[index])) indices.push(...a);
-      if (b.every(index => valid[index])) indices.push(...b);
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const i = y * width + x;
+      const a = [i, i + 1, i + width];
+      const b = [i + 1, i + width + 1, i + width];
+      if (a.every(index => elevations[index] != null)) indices.push(...a);
+      if (b.every(index => elevations[index] != null)) indices.push(...b);
     }
   }
   return {vertices, indices};
 }
+
+export const textureBounds = (grid, image) => [(image.west - grid.west) / (grid.east - grid.west),
+  (grid.north - image.north) / (grid.north - grid.south),
+  (image.east - grid.west) / (grid.east - grid.west),
+  (grid.north - image.south) / (grid.north - grid.south)];
 
 export class Renderer {
   constructor(canvas) {
@@ -216,7 +248,7 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.regionalTexture = gl.createTexture();
     this.contextTexture = gl.createTexture();
-    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','featherBounds']
+    this.locations = Object.fromEntries(['eye','forward','right','vertical','magnification','light','relief','depthScale','feather','textureBounds']
       .map(name => [name, gl.getUniformLocation(this.program, name)]));
     this.sphere = this.mesh(sphereMesh());
     gl.enable(gl.DEPTH_TEST);
@@ -263,7 +295,7 @@ export class Renderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, textureImage);
   }
 
-  draw(view, terrain, textured = false, reliefFeather) {
+  draw(view, terrain, imagery) {
     const gl = this.gl;
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -276,18 +308,20 @@ export class Renderer {
       this.drawMesh(this.sphere, this.texture, 0);
       return;
     }
-    gl.disable(gl.DEPTH_TEST);
-    this.drawMesh(this.globalContext, this.texture, 0);
+    this.drawMesh(this.relief, this.texture, .16, 0, imagery.global);
+    gl.depthFunc(gl.EQUAL);
+    gl.depthMask(false);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    this.drawMesh(this.localContext, this.contextTexture, 0, .06);
-    gl.enable(gl.DEPTH_TEST);
-    this.drawMesh(this.relief, textured ? this.regionalTexture : this.texture, textured ? .08 : 1, reliefFeather ? .07 : 0, reliefFeather);
+    if (imagery.context) this.drawMesh(this.relief, this.contextTexture, .12, .16, imagery.context);
+    if (imagery.regional) this.drawMesh(this.relief, this.regionalTexture, .08, .12, imagery.regional);
+    if (imagery.topography) this.drawMesh(this.relief, this.texture, 1, .085);
     gl.disable(gl.BLEND);
+    gl.depthMask(true);
+    gl.depthFunc(gl.LESS);
   }
 
-  drawMesh(mesh, texture, relief, feather = 0, featherBounds = [0, 0, 1, 1]) {
-    if (!mesh) return;
+  drawMesh(mesh, texture, relief, feather = 0, bounds = [0, 0, 1, 1]) {
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
@@ -299,7 +333,7 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.uniform1f(this.locations.relief, relief);
     gl.uniform1f(this.locations.feather, feather);
-    gl.uniform4fv(this.locations.featherBounds, featherBounds);
+    gl.uniform4fv(this.locations.textureBounds, bounds);
     gl.drawElements(gl.TRIANGLES, mesh.size, gl.UNSIGNED_SHORT, 0);
   }
 }

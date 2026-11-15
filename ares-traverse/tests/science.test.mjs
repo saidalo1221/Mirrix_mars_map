@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import test from 'node:test';
 import {distance, lonLat, MARS_RADIUS, normalizePoint, wrap, xyz} from '../dist/nav/geo.js';
 import {contains, createGrid, nodePoint, sample} from '../dist/nav/elevation.js';
-import {camera, intersectRelief, intersectSphere, project, ray, reliefMesh, terrainModel} from '../dist/nav/graphics.js';
+import {camera, displayElevation, intersectRelief, intersectSphere, project, ray, reliefMesh, terrainModel} from '../dist/nav/graphics.js';
 import {explain, findPath, planMission} from '../dist/nav/routing.js';
 import {makeReport} from '../dist/nav/report.js';
 import {atStop, fieldPosition, fieldStatus} from '../dist/nav/field-model.js';
@@ -90,7 +90,7 @@ test('Relief displacement, exaggeration and mesh picking share one coordinate sy
   const mesh = reliefMesh(grid, model);
   const node = nodePoint(grid, 1, 1);
   const target = model.position(node, 40);
-  assert.deepEqual(mesh.vertices.slice(36, 39), target);
+  mesh.vertices.slice(36, 39).forEach((value, index) => close(value, target[index]));
   close(model.position(node, 50)[1] - target[1], 30 / model.meters);
   const hit = intersectRelief([target[0], 2, target[2]], [0,-1,0], mesh);
   hit.forEach((value, index) => close(value, target[index]));
@@ -193,4 +193,32 @@ test('Field timeline uses snapped stop stations and an explicit equipment reserv
   assert.equal(report.thermalImagery.name, 'THEMIS daytime infrared');
   assert.equal(report.fieldSimulation.scienceTasks[0].completedAt, completedAt);
   close(report.fieldSimulation.distanceTraversedMeters, stop.station);
+});
+
+
+test('Each bundled regional mesh joins measured surrounding relief and can be picked outside the routing grid', async () => {
+  for (const entry of catalog.regions) {
+    assert.ok(entry.contextDem, entry.id);
+    const grid = createGrid(entry, await json(entry.url));
+    const source = await json(entry.contextDem);
+    const context = createGrid({}, source);
+    const samples = Buffer.alloc(source.values.length * 2);
+    source.values.forEach((value, index) => samples.writeInt16LE(value, index * 2));
+    assert.equal(createHash('sha256').update(samples).digest('hex'), source.sourceSamplesSha256);
+    assert.equal(context.dx, 1 / 128);
+    assert.equal(context.dy, 1 / 128);
+    const model = terrainModel(grid);
+    const edge = {lat:model.lat, lon:grid.east};
+    close(displayElevation(grid, context, edge), sample(grid, edge));
+    close(displayElevation(grid, context, {...edge, lon:edge.lon + 1e-6}), sample(grid, edge), .05);
+    const outside = {lat:model.lat, lon:grid.east + .04};
+    assert.equal(sample(grid, outside), null);
+    const expected = sample(context, outside);
+    assert.ok(Number.isFinite(expected), entry.id);
+    const mesh = reliefMesh(grid, model, context);
+    assert.ok(mesh.vertices.length / 9 <= 65536);
+    const [x, y, z] = model.position(outside, expected);
+    const hit = intersectRelief([x, y + 20, z], [0,-1,0], mesh);
+    assert.ok(hit && Math.abs(hit[1] - y) * model.meters / model.exaggeration < 25, entry.id);
+  }
 });

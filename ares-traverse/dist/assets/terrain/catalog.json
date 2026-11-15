@@ -24,6 +24,7 @@
       "id": "jezero",
       "name": "Jezero western fan",
       "url": "jezero.json",
+      "contextDem": "jezero-mola.json",
       "west": 77.36508248166339,
       "east": 77.48674163377713,
       "south": 18.402287073183548,
@@ -73,6 +74,7 @@
       "id": "gale",
       "name": "Gale lower Mount Sharp",
       "url": "gale.json",
+      "contextDem": "gale-mola.json",
       "west": 137.3570483817099,
       "east": 137.3840173311522,
       "south": -4.664151788881264,
@@ -145,7 +147,8 @@
         "waypoints": [],
         "description": "Example route through the verified local elevation window."
       },
-      "url": "mawrth.json"
+      "url": "mawrth.json",
+      "contextDem": "mawrth-mola.json"
     },
     {
       "id": "gusev",
@@ -174,7 +177,8 @@
         "waypoints": [],
         "description": "Example route through the verified local elevation window."
       },
-      "url": "gusev.json"
+      "url": "gusev.json",
+      "contextDem": "gusev-mola.json"
     },
     {
       "id": "olympus",
@@ -203,7 +207,8 @@
         "waypoints": [],
         "description": "Example route through the verified local elevation window."
       },
-      "url": "olympus.json"
+      "url": "olympus.json",
+      "contextDem": "olympus-mola.json"
     },
     {
       "id": "valles",
@@ -232,7 +237,8 @@
         "waypoints": [],
         "description": "Example route through the verified local elevation window."
       },
-      "url": "valles.json"
+      "url": "valles.json",
+      "contextDem": "valles-mola.json"
     },
     {
       "id": "elysium",
@@ -261,7 +267,8 @@
         "waypoints": [],
         "description": "Example route through the verified local elevation window."
       },
-      "url": "elysium.json"
+      "url": "elysium.json",
+      "contextDem": "elysium-mola.json"
     }
   ]
 }

@@ -82,3 +82,5 @@ main{max-width:1600px;margin:auto;padding:27px 27px 0}.page-heading{display:flex
 .model-results{display:grid;gap:4px;max-height:220px;overflow:auto;margin:6px 0}
 .model-results button{text-align:left;font-size:11px}
 .model-results small{display:block;overflow-wrap:anywhere;margin-top:3px;color:var(--muted)}
+
+#open-local-terrain{width:100%;color:var(--cyan);font-size:12px}

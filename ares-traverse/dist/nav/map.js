@@ -1,6 +1,6 @@
 import {clamp, coordinates, lonLat, RAD, wrap, xyz} from './geo.js';
-import {contains, sample} from './elevation.js';
-import {camera, contextPlane, dot, intersectRelief, intersectSphere, project, ray, reliefMesh, Renderer, terrainModel} from './graphics.js';
+import {contains} from './elevation.js';
+import {camera, contextBounds, displayElevation, dot, intersectRelief, intersectSphere, project, ray, reliefMesh, Renderer, terrainModel, textureBounds} from './graphics.js';
 
 export const ROUTE_COLORS = ['#82eadb', '#ff9c62', '#d5a6f8', '#f4d988', '#a5bdff'];
 
@@ -60,17 +60,11 @@ export class MarsMap {
     this.invalidate();
   }
 
-  setGrid(grid) {
+  setGrid(grid, contextGrid) {
     if (!grid || this.grid === grid) return;
     this.grid = grid;
     this.terrain = terrainModel(grid);
-    this.mesh = reliefMesh(grid, this.terrain);
-    this.renderer?.setRelief(this.mesh);
-    const {lat, lon, meters, eastFactor, northFactor} = this.terrain;
-    this.renderer?.replaceMesh('globalContext', contextPlane(this.terrain, {
-      west:lon - 100 * meters / eastFactor, east:lon + 100 * meters / eastFactor,
-      north:lat + 100 * meters / northFactor, south:lat - 100 * meters / northFactor,
-    }, true));
+    this.setElevationContext(contextGrid);
     const raster = this.topography = document.createElement('canvas');
     raster.width = grid.width;
     raster.height = grid.height;
@@ -83,6 +77,20 @@ export class MarsMap {
       pixels.data.set([70 + 148 * value, 44 + 119 * value, 40 + 82 * value, 255], index * 4);
     }
     context.putImageData(pixels, 0, 0);
+    this.invalidate();
+  }
+
+  setElevationContext(grid) {
+    this.contextGrid = grid;
+    const bounds = contextBounds(this.grid);
+    this.terrainBounds = grid && !grid.wrapLongitude ? {
+      west:Math.max(grid.west, bounds.west), east:Math.min(grid.east, bounds.east),
+      north:Math.min(grid.north, bounds.north), south:Math.max(grid.south, bounds.south),
+    } : bounds;
+    if (this.renderer) {
+      this.mesh = reliefMesh(this.grid, this.terrain, grid, this.terrainBounds);
+      this.renderer.setRelief(this.mesh);
+    }
     this.invalidate();
   }
 
@@ -128,15 +136,7 @@ export class MarsMap {
     const thermal = Boolean(layer.interpretation);
     this.regionalImage = thermal ? image : featheredRaster(image);
     this.regionalLayer = layer;
-    const {west, east, north, south} = this.grid;
-    const spanX = layer.east - layer.west, spanY = layer.north - layer.south;
-    this.reliefFeather = thermal ? undefined : [(west - layer.west) / spanX, (layer.north - north) / spanY,
-      (east - layer.west) / spanX, (layer.north - south) / spanY];
-    if (this.renderer) {
-      this.mesh = reliefMesh(this.grid, this.terrain, layer);
-      this.renderer.setRelief(this.mesh);
-      this.renderer.setImage(image, this.renderer.regionalTexture);
-    }
+    if (this.renderer) this.renderer.setImage(image, this.renderer.regionalTexture);
     this.invalidate();
     return true;
   }
@@ -144,17 +144,13 @@ export class MarsMap {
   async setContextImagery(layer) {
     this.requestedContext = layer;
     this.contextLayer = null;
-    this.renderer?.replaceMesh('localContext', null);
     this.invalidate();
     if (!layer) return;
     const image = await this.loadImage(layer);
     if (this.requestedContext !== layer) return;
     this.contextLayer = layer;
     this.contextRaster = featheredRaster(image);
-    if (this.renderer) {
-      this.renderer.replaceMesh('localContext', contextPlane(this.terrain, layer));
-      this.renderer.setImage(image, this.renderer.contextTexture);
-    }
+    if (this.renderer) this.renderer.setImage(image, this.renderer.contextTexture);
     this.invalidate();
   }
 
@@ -270,7 +266,7 @@ export class MarsMap {
   pan(dx, dy, tilt) {
     if (this.mode === 'terrain' && !tilt) {
       this.orbit -= dx * .009;
-      this.tilt = clamp(this.tilt + dy * .007, .19, 1.53);
+      this.tilt = clamp(this.tilt + dy * .007, .56, 1.53);
     } else {
       const factor = this.mode === 'map' ? 1 / this.scale : this.mode === 'terrain' ? this.grid.dx * .17 : .28 / this.zoom;
       this.center = {lat: clamp(this.center.lat + dy * factor, -89.5, 89.5), lon: wrap(this.center.lon - dx * factor)};
@@ -294,14 +290,10 @@ export class MarsMap {
       return hit && lonLat(hit);
     }
     if (!this.mesh) return null;
-    const {lat, lon, meters, eastFactor, northFactor, min} = this.terrain;
+    const {lat, lon, meters, eastFactor, northFactor} = this.terrain;
     const hit = intersectRelief(this.view.eye, direction, this.mesh);
-    const planeY = this.terrain.position({lat, lon}, min - 1)[1];
-    const depth = (planeY - this.view.eye[1]) / direction[1];
-    const worldX = hit?.[0] ?? this.view.eye[0] + direction[0] * depth;
-    const worldZ = hit?.[2] ?? this.view.eye[2] + direction[2] * depth;
-    if (!hit && (!Number.isFinite(depth) || depth <= 0 || Math.max(Math.abs(worldX), Math.abs(worldZ)) > 100)) return null;
-    return {lat: clamp(lat - worldZ * meters / northFactor, -90, 90), lon: wrap(lon + worldX * meters / eastFactor)};
+    return hit && {lat:clamp(lat - hit[2] * meters / northFactor, -90, 90),
+      lon:wrap(lon + hit[0] * meters / eastFactor)};
   }
 
   location(point) {
@@ -311,8 +303,11 @@ export class MarsMap {
       const world = xyz(point);
       return dot(world, this.view.eye) > 1.005 ? project(this.view, world) : null;
     }
-    const height = point.elevation ?? sample(this.grid, point);
-    return project(this.view, this.terrain.position(point, (height ?? this.terrain.min - 1) + this.terrain.meters * .0009));
+    const {west, east, north, south} = this.terrainBounds;
+    const lon = this.terrain.lon + wrap(point.lon - this.terrain.lon);
+    if (point.lat < south || point.lat > north || lon < west || lon > east) return null;
+    const height = displayElevation(this.grid, this.contextGrid, point);
+    return height == null ? null : project(this.view, this.terrain.position(point, height + this.terrain.meters * .0009));
   }
 
   flatMap(context) {
@@ -376,12 +371,17 @@ export class MarsMap {
       this.renderer.draw(this.view, false);
     } else if (this.terrain) {
       const center = contains(this.grid, this.center) ? this.center : this.terrain;
-      const target = this.terrain.position(center, sample(this.grid, center) ?? this.terrain.base);
+      const target = this.terrain.position(center, displayElevation(this.grid, this.contextGrid, center) ?? this.terrain.base);
       const d = 2.4 / this.zoom;
       const eye = [target[0] + d * Math.cos(this.tilt) * Math.sin(this.orbit),
         target[1] + d * Math.sin(this.tilt), target[2] + d * Math.cos(this.tilt) * Math.cos(this.orbit)];
       this.view = camera(eye, target, [0, 1, 0], width, height);
-      this.renderer.draw(this.view, true, Boolean(this.regionalImage), this.contextLayer && this.regionalImage ? this.reliefFeather : undefined);
+      this.renderer.draw(this.view, true, {
+        global:textureBounds(this.grid, {west:-180, east:180, north:90, south:-90}),
+        context:this.contextLayer && textureBounds(this.grid, this.contextLayer),
+        regional:this.regionalLayer && this.regionalLayer !== this.contextLayer && textureBounds(this.grid, this.regionalLayer),
+        topography:!this.regionalLayer,
+      });
     } else return;
     this.drawOverlay(context);
   }

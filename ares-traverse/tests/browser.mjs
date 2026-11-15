@@ -26,6 +26,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#layer-credit').textContent.includes('NASA'));
   await page.waitForFunction(() => document.querySelector('#elevation-value').textContent.includes(' m'));
   assert.equal(await page.locator('#map-heading').textContent(), 'Mars globe');
+  assert.equal(await page.getByRole('button', {name:'Open local terrain'}).isVisible(), true);
   const surface = page.locator('#surface');
   const rect = await surface.boundingBox();
   const center = [rect.x + rect.width / 2, rect.y + rect.height / 2];
@@ -48,6 +49,12 @@ try {
   await page.getByRole('button', {name:'2D map'}).click();
   assert.equal(await page.locator('#map-heading').textContent(), 'Mars map');
   assert.equal(await page.locator('#location-title').textContent(), 'Jezero Crater');
+  await page.getByRole('button', {name:'Open local terrain'}).click();
+  await page.waitForFunction(() => document.querySelector('#map-heading').textContent === 'Regional terrain');
+  await page.waitForFunction(() => document.querySelector('#layer-credit').textContent.includes('MOLA surroundings (463 m'));
+  assert.equal(await page.getByRole('button', {name:'Open local terrain'}).isVisible(), true);
+  await page.getByRole('button', {name:'2D map'}).click();
+  await page.locator('#region').selectOption('');
   assert.equal(await page.locator('#demo, #field-open').count(), 0);
   assert.equal(await page.locator('.terrain-coverage, #find-terrain').count(), 0);
   await page.getByRole('button', {name:'Center map on selected point'}).click();
