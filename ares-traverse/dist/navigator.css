@@ -229,3 +229,47 @@ body[data-view=globe] .surface{background:transparent}
 .daylight-details ul,.daylight-details ol{padding-left:16px;margin:5px 0}
 .daylight-details summary{cursor:pointer;font-size:11px;margin-top:6px}
 #eva-warnings{color:#ffb09a}
+/* Map sizing and progress */
+.map-header{padding-right:190px;min-height:40px}
+.map-size-controls{position:absolute;top:8px;right:108px;z-index:4;font-size:11px}
+.map-size-controls summary{cursor:pointer;list-style:none;width:max-content;margin-left:auto;background:#131c2cee;border:1px solid #65799b65;border-radius:7px;padding:5px 8px;font-weight:700}
+.map-size-body{display:grid;gap:7px;width:182px;margin-top:5px;padding:9px;background:#0d111ef5;border:1px solid #65799b65;border-radius:10px;box-shadow:0 8px 25px #0008}
+.map-size-body output{float:right;color:var(--cyan)}
+.map-size-body input[type=range]{accent-color:var(--cyan);padding:0}
+.map-size-wide{display:flex;align-items:center;gap:5px}
+.map-size-wide input{width:auto;margin:0}
+.map-size-body button{font-size:11px;padding:5px}
+.workspace:not(:fullscreen):not(.fullscreen-fallback) .surface{height:clamp(310px,var(--map-height,68dvh),1200px);flex:none}
+.workspace:fullscreen.map-custom-height .surface,.workspace.fullscreen-fallback.map-custom-height .surface{height:clamp(280px,var(--map-height),1200px);flex:none}
+.workspace:fullscreen .map-header,.workspace.fullscreen-fallback .map-header{padding-right:12px;min-height:80px;align-items:start}
+.workspace:fullscreen .map-size-controls,.workspace.fullscreen-fallback .map-size-controls{top:50px;right:148px}
+.workspace.map-wide{grid-template-columns:minmax(0,1fr) minmax(0,1fr);height:auto;align-items:start}
+.workspace.map-wide .map-column{grid-row:1;grid-column:1/-1}
+.workspace.map-wide .control-panel,.workspace.map-wide .inspector{max-height:70dvh;overflow:auto;grid-column:auto}
+@media(min-width:1051px) and (min-height:680px){
+  .workspace:not(:fullscreen):not(.fullscreen-fallback):not(.map-wide){height:auto;min-height:calc(100dvh - 140px)}
+  .workspace:not(:fullscreen):not(.fullscreen-fallback) .map-panel{flex:none}
+  .workspace:not(.map-wide) .control-panel,.workspace:not(.map-wide) .inspector{max-height:calc(max(var(--map-height,68dvh),55dvh) + 135px)}
+}
+@media(max-width:620px){
+  .map-header{padding-right:155px}
+  .map-size-controls{right:98px}
+  .workspace.map-wide{grid-template-columns:minmax(0,1fr)}
+  .workspace.map-wide .control-panel,.workspace.map-wide .inspector{max-height:none;grid-row:auto}
+  .workspace:fullscreen .mars-time,.workspace.fullscreen-fallback .mars-time{right:12px}
+  .workspace:fullscreen .map-size-controls,.workspace.fullscreen-fallback .map-size-controls{right:100px}
+}
+.map-loading{position:absolute;inset:0;z-index:6;display:grid;place-content:center;justify-items:center;gap:15px;padding:16px;text-align:center;background:radial-gradient(ellipse at center,#201a35f5,#090d19f5 67%);pointer-events:none}
+.map-loading strong{font-size:13px;color:#ffbd97}
+.loading-system{width:224px;height:130px;position:relative;isolation:isolate}
+.loading-orbit,.loading-star{position:absolute;left:50%;top:50%;border-radius:50%;transform:translate(-50%,-50%)}
+.loading-orbit{width:var(--diameter);height:calc(var(--diameter)*.55);border:1px solid #9aabd94d}
+.loading-orbit i{position:absolute;left:50%;top:50%;width:6px;aspect-ratio:1;border-radius:50%;background:var(--color);offset-path:ellipse(50% 50% at center);offset-distance:var(--start);offset-position:0 0;animation:mars-loader-orbit var(--speed) linear infinite}
+.orbit-inner{--diameter:66px;--color:#d7cfb7;--speed:3.5s;--start:15%}
+.orbit-middle{--diameter:108px;--color:#8db5d0;--speed:5.5s;--start:53%}
+.orbit-mars{--diameter:160px;--color:#ff976a;--speed:7.5s;--start:0%;border-color:#ff9b747d}
+.orbit-mars i{width:14px;border:1px solid #ffccac;background:radial-gradient(circle at 32% 27%,#ffc88f,#dd5f38 75%);box-shadow:0 0 14px #ff976ace,0 0 0 4px #ff9b7438}
+.orbit-outer{--diameter:218px;--color:#cab6d6;--speed:11s;--start:73%}
+.loading-star{width:18px;height:18px;background:#ffdfa0;box-shadow:0 0 25px 8px #ffc36975}
+@keyframes mars-loader-orbit{to{offset-distance:calc(var(--start) + 100%)}}
+@media(prefers-reduced-motion:reduce){.loading-orbit i{animation:none}}

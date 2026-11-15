@@ -518,26 +518,6 @@ export class MarsMap {
     }
   }
 
-  drawSunIcon(context, position, glow) {
-    if (!position) return;
-    const [x,y] = position;
-    if (x < -18 || y < -18 || x > this.width+18 || y > this.height+18) return;
-    if (glow) {
-      const halo = context.createRadialGradient(x,y,2,x,y,17);
-      halo.addColorStop(0,'#ffd786bb');
-      halo.addColorStop(1,'#ffc37300');
-      context.fillStyle = halo;
-      context.fillRect(x-17,y-17,34,34);
-    }
-    context.beginPath();
-    context.arc(x,y,4.2,0,Math.PI*2);
-    context.fillStyle = '#ffe3a1';
-    context.fill();
-    context.strokeStyle = '#85581c';
-    context.lineWidth = 1;
-    context.stroke();
-  }
-
   drawSolarMap(context) {
     if (!this.solar) return;
     const {declination,subsolar} = this.solar;
@@ -587,8 +567,7 @@ export class MarsMap {
       }
       context.stroke();
     }
-    const sunY = this.height/2-(subsolar.lat-this.center.lat)*this.scale;
-    for (let copy=-maxCopies;copy<=maxCopies;copy++) this.drawSunIcon(context,[sunX+copy*period,sunY],true);
+
   }
 
   draw() {
@@ -613,18 +592,6 @@ export class MarsMap {
       this.view = camera(eye, [0, 0, 0], [0, 1, 0], width, height);
       const light = this.solar && xyz({lat:this.solar.declination,lon:this.solar.subsolar.lon});
       this.renderer.draw(this.view,false,undefined,light ?? undefined);
-      if (this.solar && light) {
-        const marker = this.location({lat:this.solar.declination,lon:this.solar.subsolar.lon});
-        if (marker) this.drawSunIcon(context,marker,true);
-        else {
-          const horizontal = dot(light,this.view.right), vertical = dot(light,this.view.vertical);
-          const radius = Math.hypot(horizontal,vertical);
-          if (radius > .015) {
-            const reach = Math.min(width,height)*.44/radius;
-            this.drawSunIcon(context,[width/2+horizontal*reach,height/2-vertical*reach],true);
-          }
-        }
-      }
     } else if (this.terrain) {
       const center = contains(this.grid, this.center) ? this.center : this.terrain;
       const target = this.terrain.position(center, displayElevation(this.grid, this.contextGrid, center) ?? this.terrain.base);

@@ -1,4 +1,5 @@
 import * as science from '../science.js';
+import {bindMapSize, createMapLoading} from './map-controls.js';
 import {createMarsClock} from './mars-time-panel.js';
 import {formatMarsHours, marsTime, MARS_TIME_SOURCES, parseMarsHours} from './marsTime.js';
 import {elapsedAtStation, makeTraverseSchedule, positionAtElapsed, scheduleReport} from './solar-traverse.js';
@@ -21,6 +22,7 @@ const REGIONAL_IMAGERY = science.REGIONAL_IMAGERY ?? {};
 const REGIONAL_CONTEXT = science.REGIONAL_CONTEXT ?? {};
 const THERMAL_IMAGERY = science.THERMAL_IMAGERY ?? {};
 const get = id => document.getElementById(id);
+const loading = createMapLoading();
 const elevationFormat = new Intl.NumberFormat('en', {maximumFractionDigits: 0, signDisplay: 'exceptZero'});
 const resolution = meters => Number(meters.toFixed(1));
 const state = {catalog: null, global: null, grid: null, region: null, start: null, end: null,
@@ -190,7 +192,9 @@ async function selectRegionalScience(type) {
   renderRegionalControls();
   if (layer) mapStatus(`Loading ${layer.name}…`);
   try {
-    const loaded = await (type === 'blend' ? applyBlend() : map.setRegionalImagery(layer));
+    const load = () => type === 'blend' ? applyBlend() : map.setRegionalImagery(layer);
+    const loaded = await (layer || type === 'blend' ?
+      loading.track('science', layer ? 'Loading ' + layer.name : 'Loading science layers',load) : load());
     if (!loaded || request !== scienceRequest) return;
     renderLayerCredit();
     mapStatus('');
@@ -360,6 +364,7 @@ function renderWaypoints() {
 
 function invalidateMission() {
   state.revision++;
+  loading.clear('route');
   state.routes = [];
   state.active = null;
   state.progress = 0;
@@ -385,7 +390,12 @@ function stopArchiveSearch() {
 }
 
 let archiveStatusId = 'terrain-search-status';
-async function findRoutingTerrain(destination = null, modelId = null) {
+function findRoutingTerrain(destination = null, modelId = null) {
+  const label = modelId ? 'Loading HiRISE terrain' : 'Searching for terrain near the destination';
+  return loading.track('archive',label,()=>loadRoutingTerrain(destination,modelId),2);
+}
+
+async function loadRoutingTerrain(destination, modelId) {
   stopArchiveSearch();
   archiveStatusId = modelId ? 'model-status' : 'terrain-search-status';
   const statusId = archiveStatusId;
@@ -505,6 +515,9 @@ async function selectRegion(entry) {
   const request = ++regionRequest;
   const changed = entry?.id !== state.region?.id;
   if (changed) {
+    if (!entry) loading.clear('terrain');
+    loading.clear('context');
+    loading.clear('science');
     state.missionGoal = null;
     get('mission-brief').hidden = true;
     scienceRequest++;
@@ -525,25 +538,28 @@ async function selectRegion(entry) {
     renderInspector();
     return;
   }
+  const terrainReady = loading.start('terrain','Loading terrain · ' + entry.name,3);
   try {
     const grid = archiveGrids.get(entry.id) ?? await loadGrid(entry);
     if (request !== regionRequest) return;
     state.grid = grid;
     map.setGrid(grid, state.global);
     refreshHazards();
-    if (entry.contextDem) loadContextGrid(entry).then(contextGrid => {
+    const surroundingElevation = entry.contextDem ? loadContextGrid(entry).then(contextGrid => {
       if (request !== regionRequest) return;
       map.setElevationContext(contextGrid);
       renderInspector();
       renderLayerCredit();
     }).catch(() => {
       if (request === regionRequest) renderLayerCredit();
-    });
-    map.setContextImagery(REGIONAL_CONTEXT[entry.id]).then(() => {
+    }) : null;
+    const surroundingImagery = map.setContextImagery(REGIONAL_CONTEXT[entry.id]).then(() => {
       if (request === regionRequest) renderLayerCredit();
     }).catch(() => {
       if (request === regionRequest) mapStatus('Local context imagery unavailable. Showing global imagery around the region.', true);
     });
+    loading.track('context','Loading surroundings · ' + entry.name,
+      ()=>Promise.allSettled([surroundingElevation,surroundingImagery]),1);
     renderRegionalControls();
     get('region-detail').textContent = `${resolution(entry.resolutionMeters)} m DEM · ${grid.width} × ${grid.height} samples`;
     if (changed) {
@@ -567,6 +583,8 @@ async function selectRegion(entry) {
     if (request !== regionRequest) return;
     get('region-detail').textContent = error.message;
     missionStatus('Regional elevation unavailable. Try selecting the region again.', true);
+  } finally {
+    terrainReady();
   }
 }
 
@@ -619,6 +637,7 @@ function generate() {
   const settings = readSettings();
   if (!settings || !state.grid || !state.start || !state.end) return;
   const id = ++state.revision;
+  loading.start('route','Generating routes',2);
   state.settings = settings;
   state.pending = {id, grid: state.grid, mission: {start: state.start, end: state.end, waypoints: numberedStops(), hazards:state.hazards, settings}};
   get('plan').disabled = true;
@@ -634,6 +653,7 @@ function generate() {
 
 function finishPlan({id, routes, error}) {
   if (id !== state.revision) return;
+  loading.clear('route');
   state.pending = null;
   get('plan').disabled = false;
   if (error) {
@@ -800,7 +820,7 @@ async function selectLayer(id) {
   if (!layer) return;
   if (map.mode !== 'terrain') mapStatus('Loading imagery…');
   try {
-    if (!await map.setLayer(layer)) return;
+    if (!await loading.track('imagery','Loading ' + layer.name,()=>map.setLayer(layer))) return;
     state.layer = layer;
     renderLayerCredit();
     mapStatus('');
@@ -907,7 +927,8 @@ async function showModelSuggestions(query, request) {
   const results = get('model-results');
   status('model-status', 'Searching the USGS HiRISE catalog…');
   try {
-    const matches = searchModels(await hiriseModels(),query);
+    const models = await loading.track('terrain-catalog','Searching the HiRISE catalog',()=>hiriseModels());
+    const matches = searchModels(models,query);
     if (request !== modelSearchRequest) return;
     const limit = 20;
     status('model-status', matches.length > limit ? `Showing ${limit} of ${matches.length}. Refine your search for more specific results.` :
@@ -927,6 +948,7 @@ async function showModelSuggestions(query, request) {
 
 function queueModelSuggestions(delay) {
   clearTimeout(modelSearchTimer);
+  loading.clear('terrain-catalog');
   const request = ++modelSearchRequest;
   const query = get('model-query').value.trim();
   const results = get('model-results');
@@ -1234,6 +1256,7 @@ const clock = createMarsClock({
   onChange:solar => {map.setSolar(solar); applyTraverseClock();},
   onUserTime:() => refreshSchedule(),
 });
+bindMapSize();
 clock.refresh();
 changeMode('globe');
 renderSources();
@@ -1241,7 +1264,7 @@ renderInspector();
 updateOverlay();
 if (MAP_LAYERS.length) selectLayer(MAP_LAYERS[0].id);
 else mapStatus('Global imagery unavailable.', true);
-getTerrainCatalog().then(catalog => {
+loading.track('catalog','Loading the Mars terrain catalog',()=>getTerrainCatalog().then(catalog => {
   state.catalog = catalog;
   get('demo').disabled = !catalog.regions.some(entry => entry.id === 'jezero');
   for (const entry of catalog.regions) {
@@ -1259,7 +1282,7 @@ getTerrainCatalog().then(catalog => {
     }
     renderInspector();
   });
-}).catch(error => {
+})).catch(error => {
   state.globalError = error.message;
   if (!state.catalog) get('region-detail').textContent = 'Elevation catalog unavailable.';
   renderInspector();
